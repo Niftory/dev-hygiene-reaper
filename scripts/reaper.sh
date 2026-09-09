@@ -17,6 +17,8 @@
 #     immediately. This catches hung runners, not just their workers.
 #   * agent-browser — hourly. Reclaims RAM/CPU from idle daemons via 2
 #     consecutive idle-CPU-rate sightings ~2h apart.
+#   * local dev services — hourly. Reclaims stale, idle Inngest, Hatchet, SST,
+#     Vite, and Turbo dev processes after two idle observations.
 #   * workspace storage cleanup — every 6h. Disk fills slowly; more frequent
 #     scans add I/O without helping.
 #   * docker volumes/images — daily. Same reasoning, even slower to refill.
@@ -82,6 +84,17 @@ if due "$HYGIENE_DIR/.last-agent-browser" 3600; then
   fi
 else
   log "-- agent-browser: not due yet --"
+fi
+
+if due "$HYGIENE_DIR/.last-dev-services" 3600; then
+  log "== local dev-service check (hourly) =="
+  if [ -f "$SCRIPT_DIR/reap-dev-services.sh" ]; then
+    bash "$SCRIPT_DIR/reap-dev-services.sh" 2>&1 | sed 's/^/  /'
+  else
+    log "  reap-dev-services.sh not found — skipping"
+  fi
+else
+  log "-- dev services: not due yet --"
 fi
 
 if due "$HYGIENE_DIR/.last-storage" 21600; then

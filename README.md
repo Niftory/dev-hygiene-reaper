@@ -10,6 +10,7 @@ The included reapers handle:
 - abandoned ChatGPT helper processes;
 - runaway Vitest runs;
 - idle `agent-browser` daemons;
+- stale local Inngest, Hatchet, SST, Vite, and Turbo dev processes;
 - rebuildable workspace caches and stale clean Git worktrees; and
 - unused Docker state.
 
@@ -51,6 +52,7 @@ launchctl bootout "gui/$(id -u)/com.example.dev-hygiene-reaper"
 | --- | --- |
 | Next.js, ChatGPT helpers, Vitest | Every 5 minutes |
 | `agent-browser` daemons | Hourly |
+| Local dev services | Hourly |
 | Workspace cache and worktree cleanup | Every 6 hours |
 | Docker cleanup | Daily |
 
@@ -63,6 +65,10 @@ top of each script. Useful settings include:
 - `DEV_HYGIENE_STALE_DAYS`: age before a clean linked worktree is removed.
 - `NEXT_REAP_SWAP_MAX_MB` and `NEXT_REAP_TREE_RSS_MAX_MB`.
 - `VITEST_REAP_AGE_MIN_SEC` and `VITEST_REAP_RSS_MAX_MB`.
+- `DEV_SERVICE_REAP_SERVICES`: space-separated allowlist. Defaults to
+  `inngest hatchet sst vite turbo`.
+- `DEV_SERVICE_REAP_AGE_MIN_SEC`, `DEV_SERVICE_REAP_IDLE_CPU_SEC`, and
+  `DEV_SERVICE_REAP_IDLE_RUNS`.
 
 The Docker reaper deletes only dangling anonymous volumes. It also prunes
 stopped containers, unused images, and unreferenced build cache.
@@ -76,7 +82,11 @@ bash scripts/reap-next-jobs.sh --dry-run
 bash scripts/reap-runaway-vitest.sh --dry-run
 bash scripts/reap-orphaned-chatgpt-helpers.sh --dry-run
 bash scripts/reap-idle-agent-browser.sh --dry-run
+bash scripts/reap-dev-services.sh --dry-run
 ```
+
+The service reaper matches explicit local dev commands. It never matches a
+bare process name, walks upward to a shell, or targets a remote service.
 
 The storage and Docker reapers perform cleanup when run. Inspect them and use
 a disposable machine or test checkout first.
