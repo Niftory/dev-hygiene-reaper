@@ -11,8 +11,10 @@ The included reapers handle:
 - runaway Vitest runs;
 - idle `agent-browser` daemons;
 - stale local Inngest, Hatchet, SST, Vite, and Turbo dev processes;
-- rebuildable workspace caches and stale clean Git worktrees; and
-- unused Docker state.
+- rebuildable workspace caches, old dependencies, and stale clean Git worktrees;
+- stale temporary directories from local coding agents;
+- old pnpm stores, package caches, and superseded Node patch versions; and
+- unused Docker state, including orphaned agent-project volumes.
 
 This project is macOS-specific. It uses `launchd`, `sysctl`, and BSD `stat`.
 
@@ -54,7 +56,9 @@ launchctl bootout "gui/$(id -u)/com.example.dev-hygiene-reaper"
 | `agent-browser` daemons | Hourly |
 | Local dev services | Hourly |
 | Workspace cache and worktree cleanup | Every 6 hours |
+| Agent temporary artifact cleanup | Daily |
 | Docker cleanup | Daily |
+| Node and package tooling cleanup | Weekly |
 
 ## Configure
 
@@ -63,6 +67,9 @@ top of each script. Useful settings include:
 
 - `DEV_HYGIENE_REPOS`: space-separated primary Git checkout paths.
 - `DEV_HYGIENE_STALE_DAYS`: age before a clean linked worktree is removed.
+- `DEV_HYGIENE_STRIP_HOURS`: idle age before linked-worktree dependencies are removed.
+- `AGENT_ARTIFACT_MAX_AGE_DAYS`: age before known agent temporary directories are removed.
+- `DEV_HYGIENE_PROJECTS_ROOT`: parent directory used to verify Docker Compose projects.
 - `NEXT_REAP_SWAP_MAX_MB` and `NEXT_REAP_TREE_RSS_MAX_MB`.
 - `VITEST_REAP_AGE_MIN_SEC` and `VITEST_REAP_RSS_MAX_MB`.
 - `DEV_SERVICE_REAP_SERVICES`: space-separated allowlist. Defaults to
@@ -70,8 +77,18 @@ top of each script. Useful settings include:
 - `DEV_SERVICE_REAP_AGE_MIN_SEC`, `DEV_SERVICE_REAP_IDLE_CPU_SEC`, and
   `DEV_SERVICE_REAP_IDLE_RUNS`.
 
-The Docker reaper deletes only dangling anonymous volumes. It also prunes
-stopped containers, unused images, and unreferenced build cache.
+Storage cleanup skips paths that appear in a live process command. It removes
+only clean stale worktrees. Git branches remain. It does not remove dependencies
+from the primary checkout.
+
+Agent cleanup matches a narrow list of temporary directory prefixes. It skips
+paths that appear in a live process command. It does not touch Codex or Claude
+task history, personal files, or browser profiles.
+
+The Docker reaper deletes dangling anonymous volumes. It can also delete a
+dangling named volume when its known agent project directory no longer exists.
+It preserves base project volumes and all volumes for existing project paths.
+It also prunes stopped containers, unused images, and unreferenced build cache.
 
 ## Test safely
 

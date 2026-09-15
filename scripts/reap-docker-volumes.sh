@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
 # reap-docker-volumes.sh — reclaim disk from orphaned Docker/OrbStack state:
-# anonymous unattached volumes, stopped containers, unused images. Fully
-# unattended, every run.
+# anonymous unattached volumes, orphaned agent-project volumes, stopped
+# containers, and unused images. Fully unattended, every run.
 #
 # WHY: OrbStack's VM disk (Library/Group Containers/HUAQ24HBR6.dev.orbstack/
 # data/data.img.raw) reached 178GB on 2026-07-31 — 161.6GB of it sitting in
@@ -15,12 +15,13 @@
 # (178G -> 34G on disk) with zero risk to any real data.
 #
 # SAFETY:
-#   * Only ever removes volumes whose name is a bare 64-char hex ID — Docker's
+#   * It removes volumes whose name is a bare 64-char hex ID — Docker's
 #     auto-generated anonymous-volume naming, which no meaningful named
-#     volume (this repo's dev DBs, anything from a `-v name:path` mount or
-#     docker-compose service) can ever collide with. A NAMED volume is NEVER
-#     touched by this script, automatically or otherwise, regardless of
-#     whether it's currently attached — that decision stays manual.
+#     volume (this repo's dev DBs, anything from a `-v name:path` mount) can
+#     ever collide with.
+#   * It removes a named volume only when Docker marks it dangling, its Compose
+#     project has a known agent prefix, and that project directory is missing.
+#     Base project volumes and volumes for existing directories remain.
 #   * Only removes volumes Docker itself reports as dangling (not referenced
 #     by ANY container, running or stopped). `docker volume rm` hard-refuses
 #     to remove a volume an existing container still references, so even a
@@ -46,7 +47,8 @@
 set -uo pipefail
 
 DAEMON_PROBE_TIMEOUT="${DOCKER_REAP_PROBE_TIMEOUT:-15}"
-STATE_DIR="$HOME/.dev-hygiene"
+PROJECTS_ROOT="${DEV_HYGIENE_PROJECTS_ROOT:-${SIFT_PROJECTS_ROOT:-$HOME/Projects}}"
+STATE_DIR="${DEV_HYGIENE_STATE_DIR:-$HOME/.dev-hygiene}"
 LOCK_DIR="$STATE_DIR/reap-docker.lock"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
@@ -117,6 +119,20 @@ fi
 
 log "-- stopped containers --"
 docker container prune -f 2>&1 | sed 's/^/  /'
+
+log "-- orphaned named agent-project volumes --"
+while IFS= read -r volume; do
+  [ -n "$volume" ] || continue
+  project="$(docker volume inspect "$volume" \
+    --format '{{index .Labels "com.docker.compose.project"}}' 2>/dev/null || true)"
+  case "$project" in
+    agent-*|crm-agent-*|sift-agent-*|sift-core-*|sift-crm-*) ;;
+    *) continue ;;
+  esac
+  [ -d "$PROJECTS_ROOT/$project" ] && continue
+  log "  removing $volume (missing project: $project)"
+  docker volume rm "$volume" >/dev/null 2>&1 || log "  keep $volume: removal failed"
+done < <(docker volume ls -f dangling=true --format '{{.Name}}' 2>/dev/null)
 
 log "-- unused images --"
 docker image prune -a -f 2>&1 | sed 's/^/  /'

@@ -21,7 +21,9 @@
 #     Vite, and Turbo dev processes after two idle observations.
 #   * workspace storage cleanup — every 6h. Disk fills slowly; more frequent
 #     scans add I/O without helping.
+#   * agent artifacts — daily. Removes stale, known temporary directories only.
 #   * docker volumes/images — daily. Same reasoning, even slower to refill.
+#   * Node and tooling caches — weekly. Package stores refill slowly.
 # Running every expensive check on the tightest (5min) interval would waste CPU/IO
 # re-scanning worktrees and Docker state almost every time with nothing new
 # to find. This script keeps ONE launchd job but preserves each check's
@@ -108,6 +110,17 @@ else
   log "-- storage: not due yet --"
 fi
 
+if due "$HYGIENE_DIR/.last-agent-artifacts" 86400; then
+  log "== stale agent artifact cleanup (daily) =="
+  if [ -f "$SCRIPT_DIR/reap-agent-artifacts.sh" ]; then
+    bash "$SCRIPT_DIR/reap-agent-artifacts.sh" 2>&1 | sed 's/^/  /'
+  else
+    log "  reap-agent-artifacts.sh not found — skipping"
+  fi
+else
+  log "-- agent artifacts: not due yet --"
+fi
+
 if due "$HYGIENE_DIR/.last-docker" 86400; then
   log "== docker volume/image cleanup (daily) =="
   if [ -f "$SCRIPT_DIR/reap-docker-volumes.sh" ]; then
@@ -117,6 +130,17 @@ if due "$HYGIENE_DIR/.last-docker" 86400; then
   fi
 else
   log "-- docker: not due yet --"
+fi
+
+if due "$HYGIENE_DIR/.last-node-tooling" 604800; then
+  log "== Node and tooling cache cleanup (weekly) =="
+  if [ -f "$SCRIPT_DIR/reap-node-tooling.sh" ]; then
+    bash "$SCRIPT_DIR/reap-node-tooling.sh" 2>&1 | sed 's/^/  /'
+  else
+    log "  reap-node-tooling.sh not found — skipping"
+  fi
+else
+  log "-- Node and tooling caches: not due yet --"
 fi
 
 log "done"
