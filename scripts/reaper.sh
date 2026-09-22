@@ -50,6 +50,13 @@ else
   log "  reap-next-jobs.sh not found — skipping"
 fi
 
+log "== headless Chrome orphan/resource check (every run) =="
+if [ -f "$SCRIPT_DIR/reap-runaway-chrome.sh" ]; then
+  bash "$SCRIPT_DIR/reap-runaway-chrome.sh" 2>&1 | sed 's/^/  /'
+else
+  log "  reap-runaway-chrome.sh not found — skipping"
+fi
+
 log "== orphaned ChatGPT helper check (every run) =="
 if [ -f "$SCRIPT_DIR/reap-orphaned-chatgpt-helpers.sh" ]; then
   bash "$SCRIPT_DIR/reap-orphaned-chatgpt-helpers.sh" 2>&1 | sed 's/^/  /'
