@@ -6,6 +6,7 @@ set -euo pipefail
 CPU_LIMIT="${CHROME_REAP_CPU_PERCENT:-80}"
 RAM_LIMIT="${CHROME_REAP_RAM_PERCENT:-80}"
 PROFILE_RSS_LIMIT_MB="${CHROME_REAP_PROFILE_RSS_MB:-512}"
+TOTAL_RSS_LIMIT_MB="${CHROME_REAP_TOTAL_RSS_MB:-24576}"
 MIN_AGE_SEC="${CHROME_REAP_MIN_AGE_SEC:-120}"
 CHROME_RE='[Cc]hrom(e|ium)'
 DAEMON_RE='agent-browser'
@@ -48,8 +49,8 @@ ram_used_percent() {
 profiles() {
   # We need the complete command line to recover the exact temporary profile.
   # shellcheck disable=SC2009
-  ps -Ao command= 2>/dev/null \
-    | grep -E -- '--user-data-dir=[^[:space:]]*/(lighthouse|chrome-launcher)\.|--user-data-dir=[^[:space:]]*/agent-browser-chrome-' \
+  ps -ww -Ao command= 2>/dev/null \
+    | grep -E -- '--user-data-dir=[^[:space:]]*/(lighthouse|chrome-launcher)\.|--user-data-dir=[^[:space:]]*/(agent-browser-chrome-|playwright_chromiumdev_profile-|puppeteer_dev_chrome_profile-)' \
     | grep -E "$CHROME_RE" \
     | grep -Ev "$NEVER_KILL_RE" \
     | sed -n 's/.*--user-data-dir=\([^ ]*\).*/\1/p' \
@@ -60,6 +61,8 @@ profile_kind() {
   case "$1" in
     */lighthouse.*|*/chrome-launcher.*) echo launcher ;;
     */agent-browser-chrome-*) echo agent-browser ;;
+    */playwright_chromiumdev_profile-*) echo playwright ;;
+    */puppeteer_dev_chrome_profile-*) echo puppeteer ;;
     *) return 1 ;;
   esac
 }
@@ -68,7 +71,7 @@ profile_kind() {
 # Chrome. This prevents prefix matches and excludes shells, Node, and agents.
 profile_pids() {
   target="$1"
-  ps -Ao pid=,command= 2>/dev/null |
+  ps -ww -Ao pid=,command= 2>/dev/null |
     awk -v target="--user-data-dir=$target" '
       index($0, target) {
         tail = substr($0, index($0, target) + length(target))
@@ -76,7 +79,7 @@ profile_pids() {
       }
     ' |
     while read -r pid; do
-      cmd="$(ps -o command= -p "$pid" 2>/dev/null || true)"
+      cmd="$(ps -ww -o command= -p "$pid" 2>/dev/null || true)"
       printf '%s' "$cmd" | grep -Eq "$CHROME_RE" || continue
       printf '%s' "$cmd" | grep -Eq "$NEVER_KILL_RE" && continue
       echo "$pid"
@@ -86,7 +89,7 @@ profile_pids() {
 profile_main() {
   dir="$1"
   for pid in $(profile_pids "$dir"); do
-    cmd="$(ps -o command= -p "$pid" 2>/dev/null || true)"
+    cmd="$(ps -ww -o command= -p "$pid" 2>/dev/null || true)"
     case "$cmd" in *--type=*) continue ;; esac
     ppid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')"
     etime="$(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ')"
@@ -131,7 +134,7 @@ profile_stats() {
   renderer_pid=""
   rss_kb=0
   for pid in $(profile_pids "$dir"); do
-    cmd="$(ps -o command= -p "$pid" 2>/dev/null || true)"
+    cmd="$(ps -ww -o command= -p "$pid" 2>/dev/null || true)"
     rss="$(ps -o rss= -p "$pid" 2>/dev/null | tr -d ' ')"
     case "$rss" in ''|*[!0-9]*) rss=0 ;; esac
     rss_kb=$((rss_kb + rss))
@@ -147,6 +150,18 @@ profile_stats() {
     esac
   done
   echo "$max_cpu $renderer_pid $((rss_kb / 1024))"
+}
+
+automation_rss_mb() {
+  total=0
+  for dir in $(profiles); do
+    read -r _cpu _renderer rss_mb <<EOF
+$(profile_stats "$dir")
+EOF
+    case "$rss_mb" in ''|*[!0-9]*) continue ;; esac
+    total=$((total + rss_mb))
+  done
+  echo "$total"
 }
 
 reap_profile() {
@@ -235,5 +250,55 @@ EOF
   fi
 }
 
+# Enforce one resident-memory budget across all known automation profile types.
+# If the budget is exceeded, close the oldest profiles first. Profile matching
+# is restricted to temporary automation paths; personal Chrome profiles never
+# enter this list.
+reap_over_budget() {
+  total_mb="$(automation_rss_mb)"
+  case "$total_mb" in ''|*[!0-9]*)
+    log "total Chrome automation RSS unavailable — skip budget check"
+    return
+  esac
+
+  log "Chrome automation resident RSS: ${total_mb} MiB / ${TOTAL_RSS_LIMIT_MB} MiB cap"
+  while [ "$total_mb" -gt "$TOTAL_RSS_LIMIT_MB" ]; do
+    oldest_dir=""
+    oldest_age=0
+    oldest_rss=0
+    for dir in $(profiles); do
+      info="$(profile_main "$dir" || true)"
+      [ -n "$info" ] || continue
+      read -r _pid _ppid etime <<EOF
+$info
+EOF
+      age="$(etime_to_sec "$etime")"
+      read -r _cpu _renderer rss_mb <<EOF
+$(profile_stats "$dir")
+EOF
+      case "$rss_mb" in ''|*[!0-9]*) continue ;; esac
+      if [ "$age" -gt "$oldest_age" ]; then
+        oldest_age="$age"
+        oldest_dir="$dir"
+        oldest_rss="$rss_mb"
+      fi
+    done
+
+    if [ -z "$oldest_dir" ]; then
+      log "RSS remains ${total_mb} MiB over cap; no live automation profiles found to close"
+      break
+    fi
+
+    reap_profile "$oldest_dir" "automation RSS cap exceeded (${total_mb} MiB > ${TOTAL_RSS_LIMIT_MB} MiB); closing oldest profile (age ${oldest_age}s, RSS ${oldest_rss} MiB)"
+    new_total_mb="$(automation_rss_mb)"
+    if [ "$new_total_mb" -ge "$total_mb" ]; then
+      log "automation RSS did not fall after closing $oldest_dir; stop budget cleanup"
+      break
+    fi
+    total_mb="$new_total_mb"
+  done
+}
+
 reap_orphans
 reap_pressure
+reap_over_budget

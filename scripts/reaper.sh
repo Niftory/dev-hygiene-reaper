@@ -17,7 +17,8 @@
 #   * Idle language servers — every run. Closes idle or runaway TypeScript
 #     language servers left by agent sessions.
 #   * Chrome tab cap — every run. Holds the personal Chrome under its cap.
-#   * Next.js, headless Chrome, ChatGPT helpers, Vitest — every 5 minutes.
+#   * Runaway Next.js tree, headless Chrome, ChatGPT helpers, Vitest — every
+#     5 minutes.
 #     These scan more slowly and were tuned for a 5-minute cadence.
 #
 # slow lane (launchd every 300s)
@@ -156,7 +157,7 @@ fast_lane() {
   run_step "idle language-server check (every run)" reap-idle-lsp.sh "$FAST_STEP_TIMEOUT"
   run_step "Chrome tab memory cap (every run)" reap-chrome-tab-cap.sh "$FAST_STEP_TIMEOUT"
   if due "$HYGIENE_DIR/.last-fast-5min" 270; then
-    run_step "Next.js memory-pressure check (5 min)" reap-next-jobs.sh "$FAST_STEP_TIMEOUT"
+    run_step "runaway Next.js check (5 min)" reap-next-jobs.sh "$FAST_STEP_TIMEOUT"
     run_step "headless Chrome orphan/resource check (5 min)" reap-runaway-chrome.sh "$FAST_STEP_TIMEOUT"
     run_step "orphaned ChatGPT helper check (5 min)" reap-orphaned-chatgpt-helpers.sh "$FAST_STEP_TIMEOUT"
     run_step "Vitest runaway-run check (5 min)" reap-runaway-vitest.sh "$FAST_STEP_TIMEOUT"

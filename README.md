@@ -12,7 +12,7 @@ The included reapers handle:
 - idle or runaway TypeScript language servers left by agent sessions;
 - a total memory cap for the personal Google Chrome;
 - orphaned headless Chrome and runaway `agent-browser` sessions under resource pressure;
-- oversized or swap-stressed Next.js process trees;
+- a runaway Next.js process tree (one far above normal dev-server size);
 - abandoned ChatGPT helper processes;
 - runaway Vitest runs;
 - idle `agent-browser` daemons;
@@ -95,7 +95,7 @@ include:
 - `DEV_HYGIENE_STRIP_HOURS`: idle age before linked-worktree dependencies are removed.
 - `AGENT_ARTIFACT_MAX_AGE_DAYS`: age before known agent temporary directories are removed.
 - `DEV_HYGIENE_PROJECTS_ROOT`: parent directory used to verify Docker Compose projects.
-- `NEXT_REAP_SWAP_MAX_MB` and `NEXT_REAP_TREE_RSS_MAX_MB`.
+- `NEXT_REAP_TREE_MAX_MB` (default 6 GiB footprint) and `NEXT_REAP_MIN_AGE_SEC`.
 - `CHROME_REAP_CPU_PERCENT`, `CHROME_REAP_RAM_PERCENT`,
   `CHROME_REAP_PROFILE_RSS_MB`, and `CHROME_REAP_MIN_AGE_SEC`.
 - `VITEST_REAP_AGE_MIN_SEC` and `VITEST_REAP_RSS_MAX_MB`.
@@ -111,6 +111,9 @@ from the primary checkout.
 Agent cleanup matches a narrow list of temporary directory prefixes. It skips
 paths that appear in a live process command. It does not touch Codex or Claude
 task history, personal files, or browser profiles.
+
+The idle agent-browser check matches the daemon executable basename. It does
+not mistake a worktree under `.claude/` for the Claude application.
 
 The Docker reaper deletes dangling anonymous volumes. It can also delete a
 dangling named volume when its known agent project directory no longer exists.

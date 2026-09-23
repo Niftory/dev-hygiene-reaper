@@ -19,9 +19,10 @@
 # SAFETY — this box is shared by multiple concurrent Claude Code sessions:
 #   * Targets ONLY processes matching `agent-browser-darwin` (the daemon
 #     binary) and `agent-browser-chrome-<uuid>` (its Chrome user-data-dir).
-#     Neither string can appear in a `claude`, `node`, `vite`, or real-Chrome
-#     command line. A hard guard below ALSO refuses to signal any pid whose
-#     command matches `claude` or lacks `agent-browser`.
+#     The daemon guard checks the executable basename, not the full path.
+#     Worktrees under `.claude/` are common and must not look like Claude
+#     processes. A hard guard still refuses any executable outside the
+#     agent-browser allowlist.
 #   * Never matches by port. Never touches the reaper's own process tree.
 #   * A daemon is reaped only after IDLE_RUNS_TO_REAP consecutive runs under
 #     the CPU-rate threshold AND an age over AGE_MIN_SEC — activity resets the
@@ -77,6 +78,28 @@ cputime_to_sec() {
 # Previous "cpu_sec idle_runs" for a pid from the last run's state.
 prev_for() { awk -v p="$1" '$1==p {print $2, $3}' "$STATE_FILE" 2>/dev/null; }
 
+# `ps` command output starts with argv[0]. Match only that executable, because
+# an agent-browser binary can live inside a `.claude/worktrees/...` path.
+process_basename() {
+  local executable
+  executable="$(printf '%s\n' "$1" | awk 'NF {print $1; exit}')"
+  printf '%s\n' "${executable##*/}"
+}
+
+is_agent_browser_daemon() {
+  case "$(process_basename "$1")" in
+    agent-browser-darwin|agent-browser-darwin-arm64|agent-browser-darwin-x64) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+is_claude_executable() {
+  case "$(process_basename "$1")" in
+    Claude|claude|claude-code) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 reaped=0 kept=0
 DAEMONS="$(pgrep -f 'agent-browser-darwin' 2>/dev/null || true)"
 
@@ -85,12 +108,15 @@ for pid in $DAEMONS; do
   [ -z "${cputime:-}" ] && continue   # vanished between pgrep and ps
 
   # HARD GUARD: command MUST be an agent-browser daemon and MUST NOT be claude.
-  cmd="$(ps -o command= -p "$pid" 2>/dev/null || true)"
-  case "$cmd" in
-    *agent-browser-darwin*) : ;;
-    *) log "SKIP $pid — not an agent-browser daemon command"; continue;;
-  esac
-  case "$cmd" in *[Cc]laude*) log "SKIP $pid — command mentions claude"; continue;; esac
+  cmd="$(ps -ww -o command= -p "$pid" 2>/dev/null || true)"
+  if ! is_agent_browser_daemon "$cmd"; then
+    log "SKIP $pid — executable is not an agent-browser daemon"
+    continue
+  fi
+  if is_claude_executable "$cmd"; then
+    log "SKIP $pid — executable is Claude"
+    continue
+  fi
 
   age_sec="$(etime_to_sec "$etime")"
   cpu_sec="$(cputime_to_sec "$cputime")"
@@ -110,7 +136,7 @@ for pid in $DAEMONS; do
     child="$(pgrep -P "$pid" 2>/dev/null | head -1 || true)"
     uuid=""
     if [ -n "$child" ]; then
-      uuid="$(ps -o command= -p "$child" 2>/dev/null | grep -oE 'agent-browser-chrome-[0-9a-f-]{36}' | head -1 || true)"
+      uuid="$(ps -ww -o command= -p "$child" 2>/dev/null | grep -oE 'agent-browser-chrome-[0-9a-f-]{36}' | head -1 || true)"
     fi
     if [ "$DRY_RUN" = 1 ]; then
       log "WOULD REAP daemon $pid (age ${age_sec}s, idle ${idle_runs} runs)${uuid:+, chrome $uuid}"
@@ -139,9 +165,9 @@ mv -f "$NEW_STATE" "$STATE_FILE"
 orphans=0
 for cpid in $(pgrep -f 'agent-browser-chrome-' 2>/dev/null || true); do
   [ "$(ps -o ppid= -p "$cpid" 2>/dev/null | tr -d ' ')" = "1" ] || continue
-  ccmd="$(ps -o command= -p "$cpid" 2>/dev/null || true)"
+  ccmd="$(ps -ww -o command= -p "$cpid" 2>/dev/null || true)"
   case "$ccmd" in *agent-browser-chrome-*) ;; *) continue;; esac   # belt-and-suspenders
-  case "$ccmd" in *[Cc]laude*) continue;; esac
+  is_claude_executable "$ccmd" && continue
   if [ "$DRY_RUN" = 1 ]; then
     log "WOULD SWEEP orphan chrome $cpid (PPID 1)"
   else
