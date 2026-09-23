@@ -50,15 +50,15 @@ for arg in "$@"; do
 done
 
 mkdir -p "$STATE_DIR"
-touch "$STATE_FILE"
 SNAP="$(mktemp -d "${TMPDIR:-/tmp}/lsp-reap.XXXXXX")"
 trap 'rm -rf "$SNAP"' EXIT
-proc_snapshot "$SNAP"
+# Take the clock first: ps reports ages relative to its own start.
 now="$(date +%s)"
+proc_snapshot "$SNAP"
 swap_mb="$(swap_used_mb)"; swap_mb="${swap_mb:-0}"
 
-# Root: the topmost LSP process in each chain. Owner: the command of the
-# first non-LSP ancestor, used only to recognise editors.
+# Root: the topmost LSP process in each chain. Its parent is the owner, used
+# only to recognise editors.
 /usr/bin/awk -v lsp="$LSP_RE" '
   {
     pid = $1; ppid[pid] = $2; c = $0
@@ -70,29 +70,24 @@ swap_mb="$(swap_used_mb)"; swap_mb="${swap_mb:-0}"
       p = order[i]; if (cmd[p] !~ lsp) continue
       r = p
       while ((ppid[r] in cmd) && cmd[ppid[r]] ~ lsp) r = ppid[r]
-      if (!(r in seen)) { seen[r] = 1; o = ppid[r]; print r "\t" substr(cmd[o], 1, 200) }
+      if (!(r in seen)) { seen[r] = 1; print r }
     }
   }' "$SNAP/ps" > "$SNAP/roots"
 
 : > "$SNAP/state"
 : > "$SNAP/reap"
 : > "$SNAP/candidates"
+tree_table "$SNAP" < "$SNAP/roots" | with_idle "$STATE_FILE" "$SNAP/state" "$now" > "$SNAP/table"
+
 kept=0
-while IFS=$'\t' read -r root owner; do
-  age="$(field_of "$SNAP" "$root" 3)"
-  [ -n "$age" ] || continue
-  read -r mb cpu count <<EOF
-$(tree_stats "$SNAP" "$root")
-EOF
-  start=$(( now - age ))
-  since="$(idle_since "$STATE_FILE" "$root" "$start" "$cpu" "$now")"
-  echo "$root $start $cpu $since $now" >> "$SNAP/state"
+while IFS="$US" read -r since root age _cpu mb count _dir owner cmd; do
+  [ -n "$root" ] || continue
   idle=$(( now - since ))
 
   owner_kind="agent"
-  printf '%s' "$owner" | grep -Eq "$EDITOR_RE" && owner_kind="editor"
-  label="$(command_of "$SNAP" "$root" | grep -Eo "$LSP_RE" | head -1)"
-  desc="root $root [${count} procs, ${mb}MiB, age $((age / 60))m, idle $((idle / 60))m, $owner_kind] $label <- $(printf '%s' "$owner" | cut -c1-80)"
+  [[ "$owner" =~ $EDITOR_RE ]] && owner_kind="editor"
+  label="$cmd"; [[ "$cmd" =~ $LSP_RE ]] && label="${BASH_REMATCH[0]}"
+  desc="root $root [${count} procs, ${mb}MiB, age $((age / 60))m, idle $((idle / 60))m, $owner_kind] $label <- ${owner:0:80}"
 
   if [ "$owner_kind" = editor ] && [ "$REAP_EDITORS" != 1 ]; then
     [ "$DRY_RUN" -eq 1 ] && log "keep (editor-owned) $desc"
@@ -115,7 +110,7 @@ EOF
       echo "$mb $root|pressure (swap ${swap_mb}MiB >= ${PRESSURE_SWAP_MB}MiB)|$desc" >> "$SNAP/candidates"
     fi
   fi
-done < "$SNAP/roots"
+done < "$SNAP/table"
 
 if [ "$swap_mb" -ge "$PRESSURE_SWAP_MB" ] && [ ! -s "$SNAP/reap" ]; then
   sort -k1,1nr "$SNAP/candidates" | head -1 | cut -d' ' -f2- >> "$SNAP/reap"

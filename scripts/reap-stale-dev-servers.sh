@@ -67,11 +67,11 @@ for arg in "$@"; do
 done
 
 mkdir -p "$STATE_DIR"
-touch "$STATE_FILE"
 SNAP="$(mktemp -d "${TMPDIR:-/tmp}/dev-reap.XXXXXX")"
 trap 'rm -rf "$SNAP"' EXIT
-proc_snapshot "$SNAP"
+# Take the clock first: ps reports ages relative to its own start.
 now="$(date +%s)"
+proc_snapshot "$SNAP"
 swap_mb="$(swap_used_mb)"; swap_mb="${swap_mb:-0}"
 
 # Roots: walk up from each dev command while the parent is a wrapper or
@@ -98,9 +98,12 @@ swap_mb="$(swap_used_mb)"; swap_mb="${swap_mb:-0}"
     for (r in root) print r
   }' "$SNAP/ps" > "$SNAP/roots"
 
-# Every pid inside some dev tree, so presence checks ignore the trees themselves.
+# One pass over the snapshot: stats and working directory per root, plus
+# every pid inside a dev tree so presence checks can ignore the trees.
 : > "$SNAP/members"
-while read -r root; do tree_pids "$SNAP" "$root" >> "$SNAP/members"; done < "$SNAP/roots"
+: > "$SNAP/state"
+tree_table "$SNAP" "$SNAP/members" < "$SNAP/roots" \
+  | with_idle "$STATE_FILE" "$SNAP/state" "$now" > "$SNAP/table"
 
 # Working directories of shells, agents, and editors outside the dev trees.
 /usr/bin/awk -v presence="$PRESENCE_RE" -v home="$HOME" '
@@ -122,30 +125,20 @@ protected() {
   return 1
 }
 
-: > "$SNAP/state"
 : > "$SNAP/candidates"
+: > "$SNAP/reap"
 reaped=0
 kept=0
-while read -r root; do
-  age="$(field_of "$SNAP" "$root" 3)"
-  [ -n "$age" ] || continue
-  read -r mb cpu count <<EOF
-$(tree_stats "$SNAP" "$root")
-EOF
-  start=$(( now - age ))
-  since="$(idle_since "$STATE_FILE" "$root" "$start" "$cpu" "$now")"
-  echo "$root $start $cpu $since $now" >> "$SNAP/state"
+while IFS="$US" read -r since root age _cpu mb count dir _parent cmd; do
+  [ -n "$root" ] || continue
   idle=$(( now - since ))
-
-  dir="$(cwd_of "$SNAP" "$root")"
-  cmd="$(command_of "$SNAP" "$root" | cut -c1-110)"
   if [ -z "$dir" ]; then
     # Unknown cwd means lsof failed for this pid. Never guess; keep the tree.
     kept=$((kept + 1)); continue
   fi
   tree="$(worktree_of "$dir")"
   owner="unattended"; attended "$tree" && owner="attended"
-  desc="root $root [${count} procs, ${mb}MiB, age $((age / 60))m, idle $((idle / 60))m, $owner] ${tree/#$HOME/~} :: $cmd"
+  desc="root $root [${count} procs, ${mb}MiB, age $((age / 60))m, idle $((idle / 60))m, $owner] ${tree/#$HOME/~} :: ${cmd:0:110}"
 
   if [ "$age" -lt "$MIN_AGE_SEC" ] || protected "$dir"; then
     [ "$DRY_RUN" -eq 1 ] && log "keep (young or protected) $desc"
@@ -172,9 +165,8 @@ EOF
       echo "$rank $mb $root|pressure (swap ${swap_mb}MiB >= ${PRESSURE_SWAP_MB}MiB)|$desc" >> "$SNAP/candidates"
     fi
   fi
-done < "$SNAP/roots"
+done < "$SNAP/table"
 
-touch "$SNAP/reap"
 if [ "$swap_mb" -ge "$PRESSURE_SWAP_MB" ] && [ ! -s "$SNAP/reap" ]; then
   sort -k1,1nr -k2,2nr "$SNAP/candidates" | head -1 | cut -d' ' -f3- >> "$SNAP/reap"
   [ -s "$SNAP/reap" ] && kept=$((kept - 1))

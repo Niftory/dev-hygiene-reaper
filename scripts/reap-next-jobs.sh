@@ -52,25 +52,22 @@ proc_snapshot "$SNAP"
 
 [ -s "$SNAP/roots" ] || { log "done: no local Next processes"; exit 0; }
 
-best=""; best_mb=0; roots=0
-while read -r root; do
+best=""; best_mb=0; best_dir=""; roots=0
+while IFS="$US" read -r root age _cpu mb _count dir _parent _cmd; do
+  [ -n "$root" ] || continue
   roots=$((roots + 1))
-  age="$(field_of "$SNAP" "$root" 3)"
-  read -r mb _cpu _count <<EOF
-$(tree_stats "$SNAP" "$root")
-EOF
-  [ "${age:-0}" -ge "$MIN_AGE_SEC" ] || continue
+  [ "$age" -ge "$MIN_AGE_SEC" ] || continue
   if [ "$mb" -ge "$TREE_MAX_MB" ] && [ "$mb" -gt "$best_mb" ]; then
-    best="$root"; best_mb="$mb"
+    best="$root"; best_mb="$mb"; best_dir="$dir"
   fi
-done < "$SNAP/roots"
+done < <(tree_table "$SNAP" < "$SNAP/roots")
 
 if [ -z "$best" ]; then
   log "done: $roots Next roots below ${TREE_MAX_MB}MiB"
   exit 0
 fi
 
-cwd="$(cwd_of "$SNAP" "$best")"
+cwd="$best_dir"
 if [ "$DRY_RUN" -eq 1 ]; then
   log "WOULD REAP Next root $best (footprint ${best_mb}MiB >= ${TREE_MAX_MB}MiB) ${cwd/#$HOME/~}"
   exit 0

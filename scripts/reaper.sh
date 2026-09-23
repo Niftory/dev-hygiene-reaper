@@ -100,16 +100,19 @@ script_path() {
   fi
 }
 
-kill_descendants() {
+# signal_tree <signal> <pid> — signal a process and all of its descendants.
+signal_tree() {
   local child
-  for child in $(pgrep -P "$1" 2>/dev/null); do kill_descendants "$child"; done
-  kill -TERM "$1" 2>/dev/null || true
+  for child in $(pgrep -P "$2" 2>/dev/null); do signal_tree "$1" "$child"; done
+  kill "-$1" "$2" 2>/dev/null || true
 }
 
 # run_step <label> <script> <timeout-sec> — run a sub-script with indented
-# output. Stop it and its children when it exceeds the timeout.
+# output. Stop it and its children when it exceeds the timeout. The timeout
+# uses wall-clock time: under heavy swap, `sleep 1` can take several seconds,
+# so counting loop iterations let a step run far past its limit.
 run_step() {
-  local label="$1" path waited=0 pid
+  local label="$1" path pid deadline
   path="$(script_path "$2")"
   log "== $label =="
   if [ ! -f "$path" ]; then
@@ -118,14 +121,16 @@ run_step() {
   fi
   bash "$path" > >(sed 's/^/  /') 2>&1 &
   pid=$!
+  deadline=$(( SECONDS + $3 ))
   while kill -0 "$pid" 2>/dev/null; do
-    if [ "$waited" -ge "$3" ]; then
+    if [ "$SECONDS" -ge "$deadline" ]; then
       log "  TIMEOUT after ${3}s — stopping $2"
-      kill_descendants "$pid"
-      break
+      signal_tree TERM "$pid"
+      sleep 5
+      kill -0 "$pid" 2>/dev/null && signal_tree KILL "$pid"
+      return
     fi
     sleep 1
-    waited=$((waited + 1))
   done
   wait "$pid" 2>/dev/null
 }
