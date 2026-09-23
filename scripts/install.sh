@@ -68,6 +68,12 @@ load() {
       return
     fi
     launchctl bootout "$DOMAIN/$label" 2>/dev/null || true
+    # bootout returns before the job is gone; bootstrapping too early fails
+    # with "Input/output error".
+    local tries=0
+    while launchctl print "$DOMAIN/$label" >/dev/null 2>&1 && [ "$tries" -lt 50 ]; do
+      sleep 0.2; tries=$((tries + 1))
+    done
   fi
   launchctl bootstrap "$DOMAIN" "$AGENTS/$label.plist"
   echo "loaded $label"
