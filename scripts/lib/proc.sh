@@ -18,6 +18,9 @@
 #   mem  — pid footprint_mb
 #   cwd  — pid<TAB>cwd
 
+# shellcheck disable=SC2034  # used by the scripts that source this file
+US=$'\037'
+
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 
 swap_used_mb() {
@@ -83,45 +86,77 @@ tree_pids() {
     }' "$1/ps"
 }
 
-# tree_stats DIR ROOT — "footprint_mb cpu_sec process_count" for ROOT's tree.
-tree_stats() {
-  local dir="$1" root="$2"
-  tree_pids "$dir" "$root" | /usr/bin/awk '
+# tree_table DIR [MEMBERS_FILE] — read root pids on stdin and print one
+# line per live root, all in a single pass. Fields are separated by the ASCII
+# unit separator ($US), which, unlike a tab, `read` never collapses when a
+# field is empty:
+#   root age_sec cpu_sec footprint_mb procs cwd parent_command command
+# Commands are cut to 200 characters. When MEMBERS_FILE is given, every pid
+# inside the trees is written to it. Under heavy swap every process spawn is
+# slow, so the reapers must not run a command per root.
+tree_table() {
+  /usr/bin/awk -v members="${2:-}" '
     FILENAME == ARGV[1] { mem[$1] = $2; next }
-    FILENAME == ARGV[2] { cpu[$1] = $4; next }
-    { m += mem[$1]; c += cpu[$1]; n++ }
-    END { printf "%d %d %d\n", m, c, n }' "$dir/mem" "$dir/ps" -
+    FILENAME == ARGV[2] { split($0, f, "\t"); cwd[f[1]] = f[2]; next }
+    FILENAME == ARGV[3] {
+      parent[$1] = $2; age[$1] = $3; cpu[$1] = $4; pids[++n] = $1
+      c = $0; for (i = 1; i <= 4; i++) sub(/^[^ ]+ /, "", c); cmd[$1] = substr(c, 1, 200)
+      next
+    }
+    { roots[$1] = 1; order[++m] = $1 }
+    END {
+      for (i = 1; i <= n; i++) {
+        p = pids[i]; q = p; hops = 0
+        while (q != "" && q > 1 && hops++ < 64) {
+          if (q in roots) {
+            M[q] += mem[p]; C[q] += cpu[p]; N[q]++
+            if (members != "") print p > members
+            break
+          }
+          q = parent[q]
+        }
+      }
+      for (j = 1; j <= m; j++) {
+        r = order[j]; if (!(r in age)) continue
+        printf "%s\037%d\037%d\037%d\037%d\037%s\037%s\037%s\n", r, age[r], C[r], M[r], N[r], cwd[r], cmd[parent[r]], cmd[r]
+      }
+    }' "$1/mem" "$1/cwd" "$1/ps" -
 }
 
-field_of() { /usr/bin/awk -v p="$2" -v f="$3" '$1 == p { print $f; exit }' "$1/ps"; }
-command_of() {
-  /usr/bin/awk -v p="$2" '$1 == p { $1 = $2 = $3 = $4 = ""; sub(/^ +/, ""); print; exit }' "$1/ps"
-}
-cwd_of() { /usr/bin/awk -F '\t' -v p="$2" '$1 == p { print $2; exit }' "$1/cwd"; }
-
-# worktree_of PATH — the enclosing Git top level, or PATH itself.
+# worktree_of PATH — the nearest enclosing directory with a .git entry, or
+# PATH itself. Uses only shell built-ins, so it costs no process spawn.
 worktree_of() {
-  local top
-  top="$(/usr/bin/git -C "$1" rev-parse --show-toplevel 2>/dev/null)" && [ -n "$top" ] && { echo "$top"; return; }
+  local dir="$1"
+  while [ -n "$dir" ] && [ "$dir" != "/" ]; do
+    [ -e "$dir/.git" ] && { echo "$dir"; return; }
+    dir="${dir%/*}"
+  done
   echo "$1"
 }
 
 # Idle tracking. A tree is idle while its total CPU time grows by less than
-# IDLE_CPU_PERCENT of wall time between runs. State lines are:
+# IDLE_CPU_PERCENT of wall time between runs. with_idle reads tree_table lines
+# on stdin, prefixes each with its idle-since epoch, and writes the new state
+# to NEW_STATE. State lines are:
 #   pid start_epoch cpu_sec idle_since_epoch observed_epoch
-# The start epoch guards against pid reuse. BOOTSTRAP_IDLE=1 treats trees seen
-# for the first time as idle since they started, for one-shot manual cleanups.
-idle_since() {
-  local state="$1" pid="$2" start="$3" cpu="$4" now="$5" pct="${IDLE_CPU_PERCENT:-3}"
-  /usr/bin/awk -v pid="$pid" -v start="$start" -v cpu="$cpu" -v now="$now" \
-    -v pct="$pct" -v boot="${BOOTSTRAP_IDLE:-0}" '
-    $1 == pid && ($2 - start) * ($2 - start) <= 100 { seen = 1; last = $3; since = $4; stamp = $5 }
-    END {
-      if (!seen) { print (boot == 1 ? start : now); exit }
-      elapsed = now - stamp; if (elapsed < 1) elapsed = 1
-      if ((cpu - last) * 100 > pct * elapsed) print now
-      else print since
-    }' "$state" 2>/dev/null || echo "$now"
+# The start epoch guards against pid reuse. It may drift by up to 60s,
+# because a slow snapshot skews it. BOOTSTRAP_IDLE=1 treats trees seen for
+# the first time as idle since they started, for one-shot manual cleanups.
+with_idle() {
+  local state="$1" new_state="$2" now="$3"
+  touch "$state"
+  /usr/bin/awk -F '\037' -v now="$now" -v pct="${IDLE_CPU_PERCENT:-3}" \
+    -v boot="${BOOTSTRAP_IDLE:-0}" -v out="$new_state" '
+    FILENAME == ARGV[1] { split($0, s, " "); st[s[1]] = s[2]; last[s[1]] = s[3]; since[s[1]] = s[4]; stamp[s[1]] = s[5]; next }
+    {
+      pid = $1; start = now - $2; cpu = $3
+      if ((pid in st) && (st[pid] - start) * (st[pid] - start) <= 3600) {
+        elapsed = now - stamp[pid]; if (elapsed < 1) elapsed = 1
+        idle = ((cpu - last[pid]) * 100 > pct * elapsed) ? now : since[pid]
+      } else idle = (boot == 1 ? start : now)
+      print pid, start, cpu, idle, now > out
+      print idle "\037" $0
+    }' "$state" -
 }
 
 # is_under PATH ROOT — true when PATH is ROOT or inside it.
