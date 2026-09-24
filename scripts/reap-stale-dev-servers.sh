@@ -14,6 +14,10 @@
 #               DEV_REAP_MAX_AGE_IDLE_SEC, whoever owns it;
 #   pressure    swap use is at least DEV_REAP_PRESSURE_SWAP_MB. Then the
 #               largest idle tree closes, one per run, unattended trees first.
+#   emergency   the kernel reports critical memory pressure, or swap use is
+#               at least DEV_REAP_EMERGENCY_SWAP_MB. The snapshot then skips
+#               `top`, which can take a minute in that state, and up to
+#               DEV_REAP_EMERGENCY_BATCH idle trees close, oldest first.
 #
 # A tree is a dev command (Next, Vite, tsx, nodemon, Storybook, Inngest, ...)
 # plus the package-runner wrappers above it (pnpm, npm, concurrently,
@@ -45,6 +49,10 @@ PRESSURE_IDLE_SEC="${DEV_REAP_PRESSURE_IDLE_SEC:-600}"
 PRESSURE_MIN_MB="${DEV_REAP_PRESSURE_MIN_MB:-256}"
 # Space-separated path prefixes whose dev servers are never reaped.
 PROTECT="${DEV_REAP_PROTECT:-}"
+# In a memory emergency (see memory_emergency in lib/proc.sh), close up to
+# this many idle trees per run, oldest first, instead of one largest.
+EMERGENCY_BATCH="${DEV_REAP_EMERGENCY_BATCH:-3}"
+export EMERGENCY_SWAP_MB="${DEV_REAP_EMERGENCY_SWAP_MB:-24576}"
 STATE_DIR="${DEV_HYGIENE_STATE_DIR:-$HOME/.dev-hygiene}"
 STATE_FILE="$STATE_DIR/dev-server-reaper-state"
 
@@ -71,7 +79,9 @@ SNAP="$(mktemp -d "${TMPDIR:-/tmp}/dev-reap.XXXXXX")"
 trap 'rm -rf "$SNAP"' EXIT
 # Take the clock first: ps reports ages relative to its own start.
 now="$(date +%s)"
-proc_snapshot "$SNAP"
+EMERGENCY=0
+memory_emergency && EMERGENCY=1
+if [ "$EMERGENCY" -eq 1 ]; then proc_snapshot "$SNAP" --fast; else proc_snapshot "$SNAP"; fi
 swap_mb="$(swap_used_mb)"; swap_mb="${swap_mb:-0}"
 
 # Roots: walk up from each dev command while the parent is a wrapper or
@@ -160,14 +170,27 @@ while IFS="$US" read -r since root age _cpu mb count dir _parent cmd; do
     [ "$DRY_RUN" -eq 1 ] && log "keep $desc"
     kept=$((kept + 1))
     # Pressure candidates: idle, not brand new, and big enough to matter.
-    if [ "$idle" -ge "$PRESSURE_IDLE_SEC" ] && [ "$age" -ge $((PRESSURE_IDLE_SEC * 3)) ] && [ "$mb" -ge "$PRESSURE_MIN_MB" ]; then
+    # In an emergency the sizes are RSS, which undercounts, so rank by age.
+    if [ "$idle" -ge "$PRESSURE_IDLE_SEC" ] && [ "$age" -ge $((PRESSURE_IDLE_SEC * 3)) ] && \
+       { [ "$EMERGENCY" -eq 1 ] || [ "$mb" -ge "$PRESSURE_MIN_MB" ]; }; then
       rank=0; [ "$owner" = unattended ] && rank=1
-      echo "$rank $mb $root|pressure (swap ${swap_mb}MiB >= ${PRESSURE_SWAP_MB}MiB)|$desc" >> "$SNAP/candidates"
+      if [ "$EMERGENCY" -eq 1 ]; then
+        echo "$rank $age $root|emergency (critical pressure or swap >= ${EMERGENCY_SWAP_MB}MiB)|$desc" >> "$SNAP/candidates"
+      else
+        echo "$rank $mb $root|pressure (swap ${swap_mb}MiB >= ${PRESSURE_SWAP_MB}MiB)|$desc" >> "$SNAP/candidates"
+      fi
     fi
   fi
 done < "$SNAP/table"
 
-if [ "$swap_mb" -ge "$PRESSURE_SWAP_MB" ] && [ ! -s "$SNAP/reap" ]; then
+if [ "$EMERGENCY" -eq 1 ]; then
+  log "memory emergency — fast snapshot, closing up to $EMERGENCY_BATCH idle trees"
+  picked="$(sort -k1,1nr -k2,2nr "$SNAP/candidates" | head -"$EMERGENCY_BATCH" | cut -d' ' -f3-)"
+  if [ -n "$picked" ]; then
+    printf '%s\n' "$picked" >> "$SNAP/reap"
+    kept=$((kept - $(printf '%s\n' "$picked" | wc -l)))
+  fi
+elif [ "$swap_mb" -ge "$PRESSURE_SWAP_MB" ] && [ ! -s "$SNAP/reap" ]; then
   sort -k1,1nr -k2,2nr "$SNAP/candidates" | head -1 | cut -d' ' -f3- >> "$SNAP/reap"
   [ -s "$SNAP/reap" ] && kept=$((kept - 1))
 fi
