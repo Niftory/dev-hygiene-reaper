@@ -88,6 +88,11 @@ include:
   `DEV_REAP_PROTECT` (path prefixes that are never reaped).
 - `LSP_REAP_IDLE_SEC`, `LSP_REAP_MIN_MB`, `LSP_REAP_RUNAWAY_MB`, and
   `LSP_REAP_EDITORS`.
+- `DEV_REAP_EMERGENCY_SWAP_MB`, `DEV_REAP_EMERGENCY_BATCH`,
+  `LSP_REAP_EMERGENCY_SWAP_MB`, and `LSP_REAP_EMERGENCY_BATCH`: emergency
+  mode. It starts at critical kernel memory pressure or at 24 GiB of swap.
+  The snapshot then skips `top`, and several idle trees close per run,
+  oldest first.
 - `CHROME_TAB_CAP_MB`: the personal Chrome memory cap. Defaults to 24 GiB.
 - `DEV_HYGIENE_FAST_STEP_TIMEOUT_SEC` and `DEV_HYGIENE_SLOW_STEP_TIMEOUT_SEC`.
 - `DEV_HYGIENE_REPOS`: space-separated primary Git checkout paths.

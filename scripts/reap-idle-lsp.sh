@@ -11,6 +11,10 @@
 #             LSP_REAP_IDLE_SEC;
 #   pressure  swap use is at least LSP_REAP_PRESSURE_SWAP_MB and it has been
 #             idle for LSP_REAP_PRESSURE_IDLE_SEC (largest first, one per run);
+#   emergency critical kernel memory pressure, or swap use of at least
+#             LSP_REAP_EMERGENCY_SWAP_MB. The snapshot skips `top`, and up to
+#             LSP_REAP_EMERGENCY_BATCH servers idle for the pressure period
+#             close, oldest first, whatever their size;
 #   runaway   it is at least LSP_REAP_RUNAWAY_MB and older than
 #             LSP_REAP_RUNAWAY_AGE_SEC, busy or not. This also covers a
 #             standalone tsgo type check that has grown without bound.
@@ -35,6 +39,8 @@ PRESSURE_IDLE_SEC="${LSP_REAP_PRESSURE_IDLE_SEC:-600}"
 RUNAWAY_MB="${LSP_REAP_RUNAWAY_MB:-6144}"
 RUNAWAY_AGE_SEC="${LSP_REAP_RUNAWAY_AGE_SEC:-900}"
 REAP_EDITORS="${LSP_REAP_EDITORS:-0}"
+EMERGENCY_BATCH="${LSP_REAP_EMERGENCY_BATCH:-2}"
+export EMERGENCY_SWAP_MB="${LSP_REAP_EMERGENCY_SWAP_MB:-24576}"
 STATE_DIR="${DEV_HYGIENE_STATE_DIR:-$HOME/.dev-hygiene}"
 STATE_FILE="$STATE_DIR/lsp-reaper-state"
 
@@ -54,7 +60,9 @@ SNAP="$(mktemp -d "${TMPDIR:-/tmp}/lsp-reap.XXXXXX")"
 trap 'rm -rf "$SNAP"' EXIT
 # Take the clock first: ps reports ages relative to its own start.
 now="$(date +%s)"
-proc_snapshot "$SNAP"
+EMERGENCY=0
+memory_emergency && EMERGENCY=1
+if [ "$EMERGENCY" -eq 1 ]; then proc_snapshot "$SNAP" --fast; else proc_snapshot "$SNAP"; fi
 swap_mb="$(swap_used_mb)"; swap_mb="${swap_mb:-0}"
 
 # Root: the topmost LSP process in each chain. Its parent is the owner, used
@@ -106,13 +114,20 @@ while IFS="$US" read -r since root age _cpu mb count _dir owner cmd; do
   else
     [ "$DRY_RUN" -eq 1 ] && log "keep $desc"
     kept=$((kept + 1))
-    if [ "$mb" -ge "$MIN_MB" ] && [ "$idle" -ge "$PRESSURE_IDLE_SEC" ]; then
+    if [ "$EMERGENCY" -eq 1 ] && [ "$idle" -ge "$PRESSURE_IDLE_SEC" ] && [ "$count" -gt 1 ]; then
+      # RSS undercounts in an emergency; rank by age. A lone wrapper process
+      # (count 1) holds no project, so skip it.
+      echo "$age $root|emergency (critical pressure or swap >= ${EMERGENCY_SWAP_MB}MiB)|$desc" >> "$SNAP/candidates"
+    elif [ "$mb" -ge "$MIN_MB" ] && [ "$idle" -ge "$PRESSURE_IDLE_SEC" ]; then
       echo "$mb $root|pressure (swap ${swap_mb}MiB >= ${PRESSURE_SWAP_MB}MiB)|$desc" >> "$SNAP/candidates"
     fi
   fi
 done < "$SNAP/table"
 
-if [ "$swap_mb" -ge "$PRESSURE_SWAP_MB" ] && [ ! -s "$SNAP/reap" ]; then
+if [ "$EMERGENCY" -eq 1 ]; then
+  log "memory emergency — fast snapshot, closing up to $EMERGENCY_BATCH idle servers"
+  sort -k1,1nr "$SNAP/candidates" | head -"$EMERGENCY_BATCH" | cut -d' ' -f2- >> "$SNAP/reap"
+elif [ "$swap_mb" -ge "$PRESSURE_SWAP_MB" ] && [ ! -s "$SNAP/reap" ]; then
   sort -k1,1nr "$SNAP/candidates" | head -1 | cut -d' ' -f2- >> "$SNAP/reap"
   [ -s "$SNAP/reap" ] && kept=$((kept - 1))
 fi

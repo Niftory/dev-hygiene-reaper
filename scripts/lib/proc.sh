@@ -13,6 +13,10 @@
 # and picks the active ones instead. `top`'s MEM column is the footprint that
 # Activity Monitor and the Force Quit dialog show, so the reapers use it.
 #
+# In a memory emergency, `top` itself can take a minute, so proc_snapshot
+# --fast falls back to RSS from `ps`. RSS undercounts swapped memory, so the
+# reapers then rank by age instead of size.
+#
 # Snapshot files (all under one directory):
 #   ps   — pid ppid age_sec cpu_sec command...
 #   mem  — pid footprint_mb
@@ -30,10 +34,21 @@ swap_used_mb() {
         if (u == "G") print int(v * 1024); else print int(v); exit } }'
 }
 
-# proc_snapshot DIR — write the ps, mem, and cwd snapshot files into DIR.
+# memory_emergency — true when the kernel reports critical memory pressure,
+# or swap use reaches EMERGENCY_SWAP_MB. Both checks are a single sysctl.
+memory_emergency() {
+  local level used
+  level="$(/usr/sbin/sysctl -n kern.memorystatus_vm_pressure_level 2>/dev/null || echo 1)"
+  [ "${level:-1}" -ge 4 ] && return 0
+  used="$(swap_used_mb)"
+  [ "${used:-0}" -ge "${EMERGENCY_SWAP_MB:-24576}" ]
+}
+
+# proc_snapshot DIR [--fast] — write the ps, mem, and cwd snapshot files into
+# DIR. --fast takes memory from ps RSS instead of top's footprint.
 proc_snapshot() {
-  local dir="$1"
-  /bin/ps -axww -o pid=,ppid=,etime=,time=,command= 2>/dev/null | /usr/bin/awk '
+  local dir="$1" fast="${2:-}"
+  /bin/ps -axww -o pid=,ppid=,etime=,time=,rss=,command= 2>/dev/null | /usr/bin/awk -v mem="$dir/mem" -v fast="$fast" '
     function etime(v,   d, n, p) {
       d = 0
       if (index(v, "-")) { d = substr(v, 1, index(v, "-") - 1); v = substr(v, index(v, "-") + 1) }
@@ -52,12 +67,13 @@ proc_snapshot() {
     }
     {
       cmd = $0
-      for (i = 1; i <= 4; i++) { sub(/^[ \t]*[^ \t]+/, "", cmd) }
+      for (i = 1; i <= 5; i++) { sub(/^[ \t]*[^ \t]+/, "", cmd) }
       sub(/^[ \t]+/, "", cmd)
       print $1, $2, etime($3), cputime($4), cmd
+      if (fast == "--fast") print $1, int($5 / 1024) > mem
     }' > "$dir/ps"
 
-  /usr/bin/top -l 1 -n 5000 -stats pid,mem 2>/dev/null | /usr/bin/awk '
+  [ "$fast" = "--fast" ] || /usr/bin/top -l 1 -n 5000 -stats pid,mem 2>/dev/null | /usr/bin/awk '
     $1 ~ /^[0-9]+$/ {
       m = $2; sub(/[+-]$/, "", m); v = m + 0
       if (m ~ /G$/) v *= 1024
