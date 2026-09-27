@@ -30,9 +30,10 @@ Read each script before you use it. The scripts can terminate processes and
 delete rebuildable data.
 
 1. Clone this repository.
-2. Put machine settings in `~/.dev-hygiene/config.env`. At least set
-   `DEV_HYGIENE_REPOS` to a space-separated list of the primary Git checkouts
-   that it may clean.
+2. Put machine settings in `~/.dev-hygiene/config.env`. Storage cleanup scans
+   Git checkouts under `~/Projects` by default. Set `DEV_HYGIENE_PROJECTS_ROOT`
+   to change that root. You can also list extra primary checkouts in
+   `DEV_HYGIENE_REPOS`.
 3. Install both lanes:
 
    ```bash
@@ -96,6 +97,10 @@ include:
 - `CHROME_TAB_CAP_MB`: the personal Chrome memory cap. Defaults to 24 GiB.
 - `DEV_HYGIENE_FAST_STEP_TIMEOUT_SEC` and `DEV_HYGIENE_SLOW_STEP_TIMEOUT_SEC`.
 - `DEV_HYGIENE_REPOS`: space-separated primary Git checkout paths.
+- `DEV_HYGIENE_PROJECTS_ROOT`: root to scan for Git checkouts. Defaults to
+  `~/Projects`.
+- `DEV_HYGIENE_EMPTY_TRASH`: set to `1` to empty Finder Trash during storage
+  cleanup. The default is `0`.
 - `DEV_HYGIENE_STALE_DAYS`: age before a clean linked worktree is removed.
 - `DEV_HYGIENE_STRIP_HOURS`: idle age before linked-worktree dependencies are removed.
 - `AGENT_ARTIFACT_MAX_AGE_DAYS`: age before known agent temporary directories are removed.
@@ -112,6 +117,9 @@ include:
 Storage cleanup skips paths that appear in a live process command. It removes
 only clean stale worktrees. Git branches remain. It does not remove dependencies
 from the primary checkout.
+It discovers linked worktrees for each Git repository under the configured
+projects root. It removes common build outputs without running `du` on each
+folder. Finder Trash cleanup stays off unless `DEV_HYGIENE_EMPTY_TRASH=1`.
 
 Agent cleanup matches a narrow list of temporary directory prefixes. It skips
 paths that appear in a live process command. It does not touch Codex or Claude
