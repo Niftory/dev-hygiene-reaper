@@ -98,13 +98,14 @@ include:
 - `DEV_HYGIENE_FAST_STEP_TIMEOUT_SEC` and `DEV_HYGIENE_SLOW_STEP_TIMEOUT_SEC`.
 - `DEV_HYGIENE_REPOS`: space-separated primary Git checkout paths.
 - `DEV_HYGIENE_PROJECTS_ROOT`: root to scan for Git checkouts. Defaults to
-  `~/Projects`.
+  `~/Projects`. Docker cleanup also uses it to verify Compose projects.
 - `DEV_HYGIENE_EMPTY_TRASH`: set to `1` to empty Finder Trash during storage
   cleanup. The default is `0`.
 - `DEV_HYGIENE_STALE_DAYS`: age before a clean linked worktree is removed.
 - `DEV_HYGIENE_STRIP_HOURS`: idle age before linked-worktree dependencies are removed.
 - `AGENT_ARTIFACT_MAX_AGE_DAYS`: age before known agent temporary directories are removed.
-- `DEV_HYGIENE_PROJECTS_ROOT`: parent directory used to verify Docker Compose projects.
+- `AGENT_ARTIFACT_SYSTEM_TMP_ROOT`: macOS user temp root. Defaults to the path
+  from `getconf DARWIN_USER_TEMP_DIR`.
 - `NEXT_REAP_TREE_MAX_MB` (default 6 GiB footprint) and `NEXT_REAP_MIN_AGE_SEC`.
 - `CHROME_REAP_CPU_PERCENT`, `CHROME_REAP_RAM_PERCENT`,
   `CHROME_REAP_PROFILE_RSS_MB`, and `CHROME_REAP_MIN_AGE_SEC`.
@@ -121,9 +122,12 @@ It discovers linked worktrees for each Git repository under the configured
 projects root. It removes common build outputs without running `du` on each
 folder. Finder Trash cleanup stays off unless `DEV_HYGIENE_EMPTY_TRASH=1`.
 
-Agent cleanup matches a narrow list of temporary directory prefixes. It skips
-paths that appear in a live process command. It does not touch Codex or Claude
-task history, personal files, or browser profiles.
+Agent cleanup matches known agent prefixes in `/private/tmp`. In the macOS user
+temp folder, it removes old top-level entries only when no process has an open
+file there or refers to the path in its command. It preserves empty folders and
+Apple service folders. It also keeps any temp folder with a recently changed
+file inside it. It does not touch Codex or Claude task history, personal files,
+or persistent browser profiles.
 
 The idle agent-browser check matches the daemon executable basename. It does
 not mistake a worktree under `.claude/` for the Claude application.
