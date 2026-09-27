@@ -139,8 +139,15 @@ done < "$REPO_LIST"
 
 if [ "$EMPTY_TRASH" = 1 ]; then
   if command -v osascript >/dev/null 2>&1; then
-    log "empty Finder Trash"
-    osascript -e 'tell application "Finder" to empty trash' || log "could not empty Finder Trash"
+    trash_items="$(osascript -e 'tell application "Finder" to count items in trash' 2>/dev/null || true)"
+    case "$trash_items" in
+      ''|*[!0-9]*) log "could not check Finder Trash; keep it" ;;
+      0) log "Finder Trash is already empty" ;;
+      *)
+        log "empty Finder Trash ($trash_items items)"
+        osascript -e 'tell application "Finder" to empty trash' || log "could not empty Finder Trash"
+        ;;
+    esac
   else
     log "osascript unavailable — keep Finder Trash"
   fi
