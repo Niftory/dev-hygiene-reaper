@@ -66,7 +66,8 @@ example. Without `--lane`, `reaper.sh` runs both lanes in order.
 | Lane | Check | Cadence |
 | --- | --- | --- |
 | fast | Stale dev servers, idle language servers, Chrome tab cap | Every minute |
-| fast | Headless Chrome, Next.js, ChatGPT helpers, Vitest | Every 5 minutes |
+| fast | Headless Chrome | Every 2 minutes |
+| fast | Next.js, ChatGPT helpers, Vitest | Every 5 minutes |
 | slow | `agent-browser` daemons | Hourly |
 | slow | Local dev services | Hourly |
 | slow | Workspace cache and worktree cleanup | Every 6 hours |
@@ -103,6 +104,8 @@ include:
 - `NEXT_REAP_TREE_MAX_MB` (default 6 GiB footprint) and `NEXT_REAP_MIN_AGE_SEC`.
 - `CHROME_REAP_CPU_PERCENT`, `CHROME_REAP_RAM_PERCENT`,
   `CHROME_REAP_PROFILE_RSS_MB`, and `CHROME_REAP_MIN_AGE_SEC`.
+- `CHROME_REAP_TOTAL_RSS_MB`: total temporary browser RSS limit. Defaults to
+  4 GiB. The oldest profiles close first when the limit is exceeded.
 - `VITEST_REAP_AGE_MIN_SEC` and `VITEST_REAP_RSS_MAX_MB`.
 - `DEV_SERVICE_REAP_SERVICES`: space-separated allowlist. Defaults to
   `inngest hatchet sst vite turbo`.
@@ -158,7 +161,7 @@ first time is not idle yet, so the idle rules act only after the idle period
 passes. Pass `--bootstrap-idle` to a manual run to treat unseen trees as idle
 since they started.
 
-The Chrome reaper checks launcher and agent-browser temp profiles every five
+The Chrome reaper checks launcher and agent-browser temp profiles every two
 minutes. It closes old orphaned headless Chrome trees. It also closes an
 agent-browser profile when one renderer reaches 80% CPU, or when system RAM
 use reaches 80% and that profile uses at least 512 MiB. It never targets a
