@@ -1,9 +1,10 @@
 # Dev Hygiene Reaper
 
-Cautious macOS `launchd` jobs for developer-machine cleanup. A fast lane runs
-the memory checks every minute. A slow lane runs every five minutes and does
+Cautious macOS `launchd` jobs for developer-machine cleanup. A budget lane
+checks test browser and orphan Next counts every 30 seconds. A fast lane runs
+other memory checks every minute. A slow lane runs every five minutes and does
 disk and Docker cleanup only when each check is due. A timeout bounds every
-step, so a slow cleanup cannot block the memory checks.
+step, so a slow cleanup cannot block the budget checks.
 
 The included reapers handle:
 
@@ -35,7 +36,7 @@ delete rebuildable data.
 2. Put machine settings in `~/.dev-hygiene/config.env`. At least set
    `DEV_HYGIENE_REPOS` to a space-separated list of the primary Git checkouts
    that it may clean.
-3. Install both lanes:
+3. Install all lanes:
 
    ```bash
    DEV_HYGIENE_LABEL_PREFIX=com.example.dev-hygiene-reaper scripts/install.sh
@@ -43,8 +44,9 @@ delete rebuildable data.
 
 The installer copies `scripts/` to `~/.dev-hygiene/current`, so switching
 branches in the clone never changes what runs. Run it again after pulling. It
-writes and loads two LaunchAgents: `<prefix>.fast` (every 60 seconds, log
-`~/.dev-hygiene/reaper-fast.log`) and `<prefix>` (every 5 minutes, log
+writes and loads three LaunchAgents: `<prefix>.budget` (every 30 seconds, log
+`~/.dev-hygiene/reaper-budget.log`), `<prefix>.fast` (every 60 seconds, log
+`~/.dev-hygiene/reaper-fast.log`), and `<prefix>` (every 5 minutes, log
 `~/.dev-hygiene/reaper.log`). It does not reload a lane in the middle of a run
 unless you pass `--force`.
 
@@ -61,13 +63,14 @@ launchctl bootout "gui/$(id -u)/com.example.dev-hygiene-reaper.fast"
 ```
 
 `launchd/com.example.dev-hygiene-reaper.plist` remains as a single-job
-example. Without `--lane`, `reaper.sh` runs both lanes in order.
+example. Without `--lane`, `reaper.sh` runs all lanes in order.
 
 ## Cadence
 
 | Lane | Check | Cadence |
 | --- | --- | --- |
-| fast | Browser and orphan Next budgets, stale dev servers, idle language servers, Chrome tab cap | Every minute |
+| budget | Browser and orphan Next budgets | Every 30 seconds |
+| fast | Stale dev servers, idle language servers, Chrome tab cap | Every minute |
 | fast | Next.js, ChatGPT helpers, Vitest | Every 5 minutes |
 | slow | Headless Chrome orphan and resource check | Every 5 minutes |
 | slow | `agent-browser` daemons | Hourly |
@@ -109,9 +112,9 @@ include:
 - `CHROME_REAP_TOTAL_RSS_MB`: total temporary browser RSS limit. Defaults to
   4 GiB. The oldest profiles close first when the limit is exceeded.
 - `BROWSER_REAP_MAX_SESSIONS`: cap on temporary headless browser sessions.
-  Defaults to three. The fast lane checks this every minute.
+  Defaults to three. The budget lane checks this every 30 seconds.
 - `NEXT_REAP_MAX_ORPHANS`: cap on Next dev servers whose launchers have exited.
-  Defaults to three. The fast lane checks this every minute.
+  Defaults to three. The budget lane checks this every 30 seconds.
 - `VITEST_REAP_AGE_MIN_SEC` and `VITEST_REAP_RSS_MAX_MB`.
 - `DEV_SERVICE_REAP_SERVICES`: space-separated allowlist. Defaults to
   `inngest hatchet sst vite turbo`.
