@@ -13,6 +13,7 @@ The included reapers handle:
 - a total memory cap for the personal Google Chrome;
 - orphaned headless Chrome and runaway `agent-browser` sessions under resource pressure;
 - a quick cap on temporary headless browser sessions before they fill swap;
+- a cap on detached Next dev servers whose launchers have exited;
 - a runaway Next.js process tree (one far above normal dev-server size);
 - abandoned ChatGPT helper processes;
 - runaway Vitest runs;
@@ -66,7 +67,7 @@ example. Without `--lane`, `reaper.sh` runs both lanes in order.
 
 | Lane | Check | Cadence |
 | --- | --- | --- |
-| fast | Browser test budget, stale dev servers, idle language servers, Chrome tab cap | Every minute |
+| fast | Browser and orphan Next budgets, stale dev servers, idle language servers, Chrome tab cap | Every minute |
 | fast | Next.js, ChatGPT helpers, Vitest | Every 5 minutes |
 | slow | Headless Chrome orphan and resource check | Every 5 minutes |
 | slow | `agent-browser` daemons | Hourly |
@@ -108,6 +109,8 @@ include:
 - `CHROME_REAP_TOTAL_RSS_MB`: total temporary browser RSS limit. Defaults to
   4 GiB. The oldest profiles close first when the limit is exceeded.
 - `BROWSER_REAP_MAX_SESSIONS`: cap on temporary headless browser sessions.
+  Defaults to three. The fast lane checks this every minute.
+- `NEXT_REAP_MAX_ORPHANS`: cap on Next dev servers whose launchers have exited.
   Defaults to three. The fast lane checks this every minute.
 - `VITEST_REAP_AGE_MIN_SEC` and `VITEST_REAP_RSS_MAX_MB`.
 - `DEV_SERVICE_REAP_SERVICES`: space-separated allowlist. Defaults to

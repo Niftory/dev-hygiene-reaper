@@ -13,6 +13,7 @@
 # fast lane (launchd every 60s)
 #   * Browser test budget — every run. Caps the number and memory of temporary
 #     headless sessions before they fill swap.
+#   * Orphan Next budget — every run. Limits dev servers left by dead launchers.
 #   * Stale dev servers — every run. Closes idle dev-server trees that are
 #     unattended, over a day old, in a deleted worktree, or under swap
 #     pressure. See reap-stale-dev-servers.sh.
@@ -161,6 +162,7 @@ gated() {
 
 fast_lane() {
   run_step "browser test budget (every run)" reap-browser-budget.sh "$FAST_STEP_TIMEOUT"
+  run_step "orphan Next budget (every run)" reap-orphan-next-budget.sh "$FAST_STEP_TIMEOUT"
   run_step "stale dev-server check (every run)" reap-stale-dev-servers.sh "$FAST_STEP_TIMEOUT"
   run_step "idle language-server check (every run)" reap-idle-lsp.sh "$FAST_STEP_TIMEOUT"
   run_step "Chrome tab memory cap (every run)" reap-chrome-tab-cap.sh "$FAST_STEP_TIMEOUT"
