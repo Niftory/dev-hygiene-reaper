@@ -6,7 +6,7 @@
 # so switching branches here never changes what runs. Run this again after
 # pulling to update the copy.
 #
-#   <prefix>.budget reaper.sh --lane budget, every 30s, log reaper-budget.log
+#   <prefix>.budget reaper.sh --lane budget, every 10s, log reaper-budget.log
 #   <prefix>.fast   reaper.sh --lane fast, every 60s,   log reaper-fast.log
 #   <prefix>        reaper.sh --lane slow, every 300s,  log reaper.log
 #
@@ -80,7 +80,7 @@ load() {
   echo "loaded $label"
 }
 
-write_plist "$PREFIX.budget" budget 30 "$STATE_DIR/reaper-budget.log"
+write_plist "$PREFIX.budget" budget 10 "$STATE_DIR/reaper-budget.log"
 write_plist "$PREFIX.fast" fast 60 "$STATE_DIR/reaper-fast.log"
 write_plist "$PREFIX" slow 300 "$STATE_DIR/reaper.log"
 load "$PREFIX.budget"

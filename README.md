@@ -1,7 +1,7 @@
 # Dev Hygiene Reaper
 
 Cautious macOS `launchd` jobs for developer-machine cleanup. A budget lane
-checks test browser and orphan Next counts every 30 seconds. A fast lane runs
+checks test browser memory and orphan Next counts every 10 seconds. A fast lane runs
 other memory checks every minute. A slow lane runs every five minutes and does
 disk and Docker cleanup only when each check is due. A timeout bounds every
 step, so a slow cleanup cannot block the budget checks.
@@ -44,7 +44,7 @@ delete rebuildable data.
 
 The installer copies `scripts/` to `~/.dev-hygiene/current`, so switching
 branches in the clone never changes what runs. Run it again after pulling. It
-writes and loads three LaunchAgents: `<prefix>.budget` (every 30 seconds, log
+writes and loads three LaunchAgents: `<prefix>.budget` (every 10 seconds, log
 `~/.dev-hygiene/reaper-budget.log`), `<prefix>.fast` (every 60 seconds, log
 `~/.dev-hygiene/reaper-fast.log`), and `<prefix>` (every 5 minutes, log
 `~/.dev-hygiene/reaper.log`). It does not reload a lane in the middle of a run
@@ -69,7 +69,7 @@ example. Without `--lane`, `reaper.sh` runs all lanes in order.
 
 | Lane | Check | Cadence |
 | --- | --- | --- |
-| budget | Browser and orphan Next budgets | Every 30 seconds |
+| budget | Browser memory and orphan Next budgets | Every 10 seconds |
 | fast | Stale dev servers, idle language servers, Chrome tab cap | Every minute |
 | fast | Next.js, ChatGPT helpers, Vitest | Every 5 minutes |
 | slow | Headless Chrome orphan and resource check | Every 5 minutes |
@@ -110,11 +110,12 @@ include:
 - `CHROME_REAP_CPU_PERCENT`, `CHROME_REAP_RAM_PERCENT`,
   `CHROME_REAP_PROFILE_RSS_MB`, and `CHROME_REAP_MIN_AGE_SEC`.
 - `CHROME_REAP_TOTAL_RSS_MB`: total temporary browser RSS limit. Defaults to
-  4 GiB. The oldest profiles close first when the limit is exceeded.
-- `BROWSER_REAP_MAX_SESSIONS`: cap on temporary headless browser sessions.
-  Defaults to three. The budget lane checks this every 30 seconds.
+  12 GiB, including each profile's agent-browser daemon. The oldest profiles
+  close first when the limit is exceeded. There is no session-count limit.
+  This watchdog checks every 10 seconds, so use can briefly exceed the limit
+  between checks.
 - `NEXT_REAP_MAX_ORPHANS`: cap on Next dev servers whose launchers have exited.
-  Defaults to three. The budget lane checks this every 30 seconds.
+  Defaults to three. The budget lane checks this every 10 seconds.
 - `VITEST_REAP_AGE_MIN_SEC` and `VITEST_REAP_RSS_MAX_MB`.
 - `DEV_SERVICE_REAP_SERVICES`: space-separated allowlist. Defaults to
   `inngest hatchet sst vite turbo`.

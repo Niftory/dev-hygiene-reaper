@@ -5,12 +5,12 @@
 # so fast checks do not force expensive disk and Docker scans to run often.
 #
 # Separate lanes keep slow cleanup from delaying the short budget checks.
-# The budget lane runs every 30 seconds, the fast lane every minute, and the
+# The budget lane runs every 10 seconds, the fast lane every minute, and the
 # slow lane every five minutes. A timeout bounds each step.
 #
-# budget lane (launchd every 30s)
-#   * Browser test budget — every run. Caps the number and memory of temporary
-#     headless sessions before they fill swap.
+# budget lane (launchd every 10s)
+#   * Browser test budget — every run. Caps total memory of temporary headless
+#     sessions before they fill swap.
 #   * Orphan Next budget — every run. Limits dev servers left by dead launchers.
 #
 # fast lane (launchd every 60s)
@@ -24,7 +24,7 @@
 #
 # slow lane (launchd every 300s)
 #   * Headless Chrome — every run. Closes orphaned and runaway sessions. The
-#     quick browser budget runs separately every 30 seconds.
+#     quick browser budget runs separately every 10 seconds.
 #   * agent-browser — hourly. Reclaims RAM/CPU from idle daemons via 2
 #     consecutive idle-CPU-rate sightings ~2h apart.
 #   * local dev services — hourly. Reclaims stale, idle Inngest, Hatchet, SST,

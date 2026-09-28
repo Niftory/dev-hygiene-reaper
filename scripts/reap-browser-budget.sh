@@ -3,8 +3,7 @@
 # One ps snapshot makes this safe to run before the slower checks every minute.
 set -euo pipefail
 
-MAX_SESSIONS="${BROWSER_REAP_MAX_SESSIONS:-3}"
-MAX_RSS_MB="${CHROME_REAP_TOTAL_RSS_MB:-4096}"
+MAX_RSS_MB="${CHROME_REAP_TOTAL_RSS_MB:-12288}"
 DRY_RUN=0
 [ "${1:-}" = "--dry-run" ] && DRY_RUN=1
 
@@ -23,7 +22,7 @@ ps -axww -o pid=,ppid=,etime=,rss=,command= | awk -v home="$HOME" '
     return 0
   }
   {
-    pid=$1; parent[pid]=$2; elapsed=age($3); kb=$4
+    pid=$1; parent[pid]=$2; elapsed=age($3); kb=$4; rss_pid[pid]=kb
     cmd=$0; for (i=1;i<=4;i++) sub(/^[[:space:]]*[^[:space:]]+/,"",cmd)
     sub(/^[[:space:]]+/,"",cmd)
     command[pid]=cmd
@@ -40,17 +39,18 @@ ps -axww -o pid=,ppid=,etime=,rss=,command= | awk -v home="$HOME" '
     for (profile in root) {
       p=root[profile]; daemon=parent[p]
       if (command[daemon] !~ /\/agent-browser-darwin-arm64$/) daemon=0
-      printf "%d|%d|%d|%d|%s\n",started[profile],int(rss[profile]/1024),p,daemon,profile
+      printf "%d|%d|%d|%d|%s\n",started[profile],int((rss[profile]+rss_pid[daemon])/1024),p,daemon,profile
     }
   }
 ' | sort -t '|' -k1,1nr > "$profiles"
 
 count="$(wc -l < "$profiles" | tr -d ' ')"
 total="$(awk -F '|' '{s+=$2} END {print s+0}' "$profiles")"
-log "test browsers: $count sessions, ${total}MiB RSS (limits $MAX_SESSIONS sessions, ${MAX_RSS_MB}MiB)"
+log "test browsers: $count sessions, ${total}MiB RSS (limit ${MAX_RSS_MB}MiB)"
+stopped=()
 
 while IFS='|' read -r _age rss root daemon profile; do
-  [ "$count" -gt "$MAX_SESSIONS" ] || [ "$total" -gt "$MAX_RSS_MB" ] || break
+  [ "$total" -gt "$MAX_RSS_MB" ] || break
   current="$(ps -p "$root" -o command= 2>/dev/null || true)"
   [[ "$current" == *"--user-data-dir=$profile"* && "$current" == *--headless* ]] || continue
   if [ "$DRY_RUN" -eq 1 ]; then
@@ -62,7 +62,19 @@ while IFS='|' read -r _age rss root daemon profile; do
     fi
     kill -TERM "$root" 2>/dev/null || true
     log "REAPED browser $root (${rss}MiB) $profile"
+    stopped+=("$root|$profile")
   fi
-  count=$((count-1))
   total=$((total-rss))
 done < "$profiles"
+
+if [ "${#stopped[@]}" -gt 0 ]; then
+  sleep 1
+  for entry in "${stopped[@]}"; do
+    root="${entry%%|*}"
+    profile="${entry#*|}"
+    current="$(ps -p "$root" -o command= 2>/dev/null || true)"
+    [[ "$current" == *"--user-data-dir=$profile"* && "$current" == *--headless* ]] || continue
+    kill -KILL "$root" 2>/dev/null || true
+    log "forced browser $root"
+  done
+fi
