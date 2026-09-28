@@ -11,17 +11,19 @@
 # step, so a hung step cannot block its lane.
 #
 # fast lane (launchd every 60s)
+#   * Browser test budget — every run. Caps the number and memory of temporary
+#     headless sessions before they fill swap.
 #   * Stale dev servers — every run. Closes idle dev-server trees that are
 #     unattended, over a day old, in a deleted worktree, or under swap
 #     pressure. See reap-stale-dev-servers.sh.
 #   * Idle language servers — every run. Closes idle or runaway TypeScript
 #     language servers left by agent sessions.
 #   * Chrome tab cap — every run. Holds the personal Chrome under its cap.
-#   * Headless Chrome — every 2 minutes. Its aggregate RSS cap protects the
-#     machine while browser test sessions start in parallel.
 #   * Runaway Next.js tree, ChatGPT helpers, Vitest — every 5 minutes.
 #
 # slow lane (launchd every 300s)
+#   * Headless Chrome — every run. Closes orphaned and runaway sessions. The
+#     quick browser budget in the fast lane runs separately every minute.
 #   * agent-browser — hourly. Reclaims RAM/CPU from idle daemons via 2
 #     consecutive idle-CPU-rate sightings ~2h apart.
 #   * local dev services — hourly. Reclaims stale, idle Inngest, Hatchet, SST,
@@ -158,12 +160,10 @@ gated() {
 }
 
 fast_lane() {
+  run_step "browser test budget (every run)" reap-browser-budget.sh "$FAST_STEP_TIMEOUT"
   run_step "stale dev-server check (every run)" reap-stale-dev-servers.sh "$FAST_STEP_TIMEOUT"
   run_step "idle language-server check (every run)" reap-idle-lsp.sh "$FAST_STEP_TIMEOUT"
   run_step "Chrome tab memory cap (every run)" reap-chrome-tab-cap.sh "$FAST_STEP_TIMEOUT"
-  if due "$HYGIENE_DIR/.last-fast-browser" 120; then
-    run_step "headless Chrome orphan/resource check (2 min)" reap-runaway-chrome.sh "$FAST_STEP_TIMEOUT"
-  fi
   if due "$HYGIENE_DIR/.last-fast-5min" 270; then
     run_step "runaway Next.js check (5 min)" reap-next-jobs.sh "$FAST_STEP_TIMEOUT"
     run_step "orphaned ChatGPT helper check (5 min)" reap-orphaned-chatgpt-helpers.sh "$FAST_STEP_TIMEOUT"
@@ -172,6 +172,7 @@ fast_lane() {
 }
 
 slow_lane() {
+  run_step "headless Chrome orphan/resource check (5 min)" reap-runaway-chrome.sh "$SLOW_STEP_TIMEOUT"
   gated .last-agent-browser 3600 "agent-browser idle-daemon check (hourly)" reap-idle-agent-browser.sh "$SLOW_STEP_TIMEOUT"
   gated .last-dev-services 3600 "local dev-service check (hourly)" reap-dev-services.sh "$SLOW_STEP_TIMEOUT"
   gated .last-storage 21600 "workspace storage cleanup (every 6h)" reap-storage.sh "$SLOW_STEP_TIMEOUT"

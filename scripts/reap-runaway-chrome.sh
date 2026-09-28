@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Reap abandoned headless Chrome and runaway agent-browser sessions.
-# This runs every two minutes through reaper.sh.
+# This runs every five minutes through reaper.sh.
 set -euo pipefail
 
 CPU_LIMIT="${CHROME_REAP_CPU_PERCENT:-80}"

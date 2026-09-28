@@ -12,6 +12,7 @@ The included reapers handle:
 - idle or runaway TypeScript language servers left by agent sessions;
 - a total memory cap for the personal Google Chrome;
 - orphaned headless Chrome and runaway `agent-browser` sessions under resource pressure;
+- a quick cap on temporary headless browser sessions before they fill swap;
 - a runaway Next.js process tree (one far above normal dev-server size);
 - abandoned ChatGPT helper processes;
 - runaway Vitest runs;
@@ -65,9 +66,9 @@ example. Without `--lane`, `reaper.sh` runs both lanes in order.
 
 | Lane | Check | Cadence |
 | --- | --- | --- |
-| fast | Stale dev servers, idle language servers, Chrome tab cap | Every minute |
-| fast | Headless Chrome | Every 2 minutes |
+| fast | Browser test budget, stale dev servers, idle language servers, Chrome tab cap | Every minute |
 | fast | Next.js, ChatGPT helpers, Vitest | Every 5 minutes |
+| slow | Headless Chrome orphan and resource check | Every 5 minutes |
 | slow | `agent-browser` daemons | Hourly |
 | slow | Local dev services | Hourly |
 | slow | Workspace cache and worktree cleanup | Every 6 hours |
@@ -106,6 +107,8 @@ include:
   `CHROME_REAP_PROFILE_RSS_MB`, and `CHROME_REAP_MIN_AGE_SEC`.
 - `CHROME_REAP_TOTAL_RSS_MB`: total temporary browser RSS limit. Defaults to
   4 GiB. The oldest profiles close first when the limit is exceeded.
+- `BROWSER_REAP_MAX_SESSIONS`: cap on temporary headless browser sessions.
+  Defaults to three. The fast lane checks this every minute.
 - `VITEST_REAP_AGE_MIN_SEC` and `VITEST_REAP_RSS_MAX_MB`.
 - `DEV_SERVICE_REAP_SERVICES`: space-separated allowlist. Defaults to
   `inngest hatchet sst vite turbo`.
@@ -161,7 +164,7 @@ first time is not idle yet, so the idle rules act only after the idle period
 passes. Pass `--bootstrap-idle` to a manual run to treat unseen trees as idle
 since they started.
 
-The Chrome reaper checks launcher and agent-browser temp profiles every two
+The Chrome reaper checks launcher and agent-browser temp profiles every five
 minutes. It closes old orphaned headless Chrome trees. It also closes an
 agent-browser profile when one renderer reaches 80% CPU, or when system RAM
 use reaches 80% and that profile uses at least 512 MiB. It never targets a
