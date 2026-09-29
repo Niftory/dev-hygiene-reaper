@@ -6,7 +6,7 @@ set -euo pipefail
 CPU_LIMIT="${CHROME_REAP_CPU_PERCENT:-80}"
 RAM_LIMIT="${CHROME_REAP_RAM_PERCENT:-80}"
 PROFILE_RSS_LIMIT_MB="${CHROME_REAP_PROFILE_RSS_MB:-512}"
-TOTAL_RSS_LIMIT_MB="${CHROME_REAP_TOTAL_RSS_MB:-24576}"
+TOTAL_RSS_LIMIT_MB="${CHROME_REAP_TOTAL_RSS_MB:-8192}"
 MIN_AGE_SEC="${CHROME_REAP_MIN_AGE_SEC:-120}"
 CHROME_RE='[Cc]hrom(e|ium)'
 DAEMON_RE='agent-browser'
@@ -152,18 +152,6 @@ profile_stats() {
   echo "$max_cpu $renderer_pid $((rss_kb / 1024))"
 }
 
-automation_rss_mb() {
-  total=0
-  for dir in $(profiles); do
-    read -r _cpu _renderer rss_mb <<EOF
-$(profile_stats "$dir")
-EOF
-    case "$rss_mb" in ''|*[!0-9]*) continue ;; esac
-    total=$((total + rss_mb))
-  done
-  echo "$total"
-}
-
 reap_profile() {
   dir="$1"
   reason="$2"
@@ -255,48 +243,29 @@ EOF
 # is restricted to temporary automation paths; personal Chrome profiles never
 # enter this list.
 reap_over_budget() {
-  total_mb="$(automation_rss_mb)"
-  case "$total_mb" in ''|*[!0-9]*)
-    log "total Chrome automation RSS unavailable — skip budget check"
-    return
-  esac
-
-  log "Chrome automation resident RSS: ${total_mb} MiB / ${TOTAL_RSS_LIMIT_MB} MiB cap"
-  while [ "$total_mb" -gt "$TOTAL_RSS_LIMIT_MB" ]; do
-    oldest_dir=""
-    oldest_age=0
-    oldest_rss=0
-    for dir in $(profiles); do
-      info="$(profile_main "$dir" || true)"
-      [ -n "$info" ] || continue
-      read -r _pid _ppid etime <<EOF
+  candidates="$(mktemp "${TMPDIR:-/tmp}/chrome-budget.XXXXXX")"
+  total_mb=0
+  for dir in $(profiles); do
+    info="$(profile_main "$dir" || true)"
+    [ -n "$info" ] || continue
+    read -r _pid _ppid etime <<EOF
 $info
 EOF
-      age="$(etime_to_sec "$etime")"
-      read -r _cpu _renderer rss_mb <<EOF
+    age="$(etime_to_sec "$etime")"
+    read -r _cpu _renderer rss_mb <<EOF
 $(profile_stats "$dir")
 EOF
-      case "$rss_mb" in ''|*[!0-9]*) continue ;; esac
-      if [ "$age" -gt "$oldest_age" ]; then
-        oldest_age="$age"
-        oldest_dir="$dir"
-        oldest_rss="$rss_mb"
-      fi
-    done
-
-    if [ -z "$oldest_dir" ]; then
-      log "RSS remains ${total_mb} MiB over cap; no live automation profiles found to close"
-      break
-    fi
-
-    reap_profile "$oldest_dir" "automation RSS cap exceeded (${total_mb} MiB > ${TOTAL_RSS_LIMIT_MB} MiB); closing oldest profile (age ${oldest_age}s, RSS ${oldest_rss} MiB)"
-    new_total_mb="$(automation_rss_mb)"
-    if [ "$new_total_mb" -ge "$total_mb" ]; then
-      log "automation RSS did not fall after closing $oldest_dir; stop budget cleanup"
-      break
-    fi
-    total_mb="$new_total_mb"
+    case "$rss_mb" in ''|*[!0-9]*) continue ;; esac
+    total_mb=$((total_mb + rss_mb))
+    printf '%s|%s|%s\n' "$age" "$rss_mb" "$dir" >> "$candidates"
   done
+  log "Chrome automation resident RSS: ${total_mb} MiB / ${TOTAL_RSS_LIMIT_MB} MiB cap"
+  while IFS='|' read -r age rss_mb dir; do
+    [ "$total_mb" -gt "$TOTAL_RSS_LIMIT_MB" ] || break
+    reap_profile "$dir" "automation RSS cap exceeded (${total_mb} MiB > ${TOTAL_RSS_LIMIT_MB} MiB); closing oldest profile (age ${age}s, RSS ${rss_mb} MiB)"
+    total_mb=$((total_mb - rss_mb))
+  done < <(sort -t '|' -k1,1nr "$candidates")
+  rm -f "$candidates"
 }
 
 reap_orphans

@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 #
-# install.sh — copy the reapers to a stable path and load both launchd lanes.
+# install.sh — copy the reapers to a stable path and load three launchd lanes.
 #
 # launchd runs a copy under $DEV_HYGIENE_STATE_DIR/current, not this checkout,
 # so switching branches here never changes what runs. Run this again after
 # pulling to update the copy.
 #
-#   <prefix>.fast   reaper.sh --lane fast, every 60s,  log reaper-fast.log
-#   <prefix>        reaper.sh --lane slow, every 300s, log reaper.log
+#   <prefix>.budget reaper.sh --lane budget, every 10s, log reaper-budget.log
+#   <prefix>.fast   reaper.sh --lane fast, every 60s,   log reaper-fast.log
+#   <prefix>        reaper.sh --lane slow, every 300s,  log reaper.log
 #
 # A lane that is in the middle of a run is not reloaded, because unloading a
 # job stops it. Pass --force to reload it anyway.
@@ -79,7 +80,9 @@ load() {
   echo "loaded $label"
 }
 
+write_plist "$PREFIX.budget" budget 10 "$STATE_DIR/reaper-budget.log"
 write_plist "$PREFIX.fast" fast 60 "$STATE_DIR/reaper-fast.log"
 write_plist "$PREFIX" slow 300 "$STATE_DIR/reaper.log"
+load "$PREFIX.budget"
 load "$PREFIX.fast"
 load "$PREFIX"

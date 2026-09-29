@@ -12,8 +12,7 @@
 #
 # This script closes the single largest Next tree, by physical footprint,
 # when it is at least NEXT_REAP_TREE_MAX_MB and older than
-# NEXT_REAP_MIN_AGE_SEC. The ceiling is well above a normal dev server, so
-# only a leak reaches it. The reaper targets only Next's known executable
+# NEXT_REAP_MIN_AGE_SEC. The reaper targets only Next's known executable
 # paths and process titles, includes their children, and never walks up to a
 # shell, pnpm, or an agent.
 #
@@ -25,8 +24,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/proc.sh
 . "$SCRIPT_DIR/lib/proc.sh"
 
-TREE_MAX_MB="${NEXT_REAP_TREE_MAX_MB:-6144}"
-MIN_AGE_SEC="${NEXT_REAP_MIN_AGE_SEC:-600}"
+TREE_MAX_MB="${NEXT_REAP_TREE_MAX_MB:-4096}"
+MIN_AGE_SEC="${NEXT_REAP_MIN_AGE_SEC:-120}"
 
 DRY_RUN=0
 [ "${1:-}" = "--dry-run" ] && DRY_RUN=1

@@ -4,11 +4,14 @@
 # It is intended for macOS LaunchAgents. Each concern has its own cadence,
 # so fast checks do not force expensive disk and Docker scans to run often.
 #
-# Why two lanes: the checks fall into two groups with very different costs.
-# A single serial job let a 45-minute storage cleanup block every memory
-# check behind it while swap filled. The fast lane now runs by itself every
-# minute. The slow lane runs every five minutes, and a timeout bounds each
-# step, so a hung step cannot block its lane.
+# Separate lanes keep slow cleanup from delaying the short budget checks.
+# The budget lane runs every 10 seconds, the fast lane every minute, and the
+# slow lane every five minutes. A timeout bounds each step.
+#
+# budget lane (launchd every 10s)
+#   * Test workload budget — every run. Caps total resident memory of
+#     temporary headless browsers and Next dev servers before they fill swap.
+#   * Orphan Next budget — every run. Limits dev servers left by dead launchers.
 #
 # fast lane (launchd every 60s)
 #   * Stale dev servers — every run. Closes idle dev-server trees that are
@@ -17,11 +20,12 @@
 #   * Idle language servers — every run. Closes idle or runaway TypeScript
 #     language servers left by agent sessions.
 #   * Chrome tab cap — every run. Holds the personal Chrome under its cap.
-#   * Runaway Next.js tree, headless Chrome, ChatGPT helpers, Vitest — every
-#     5 minutes.
-#     These scan more slowly and were tuned for a 5-minute cadence.
+#   * Runaway Next.js tree — every run, so a server cannot grow unchecked for
+#     five minutes. ChatGPT helpers and Vitest — every 5 minutes.
 #
 # slow lane (launchd every 300s)
+#   * Headless Chrome — every run. Closes orphaned and runaway sessions. The
+#     quick test budget runs separately every 10 seconds.
 #   * agent-browser — hourly. Reclaims RAM/CPU from idle daemons via 2
 #     consecutive idle-CPU-rate sightings ~2h apart.
 #   * local dev services — hourly. Reclaims stale, idle Inngest, Hatchet, SST,
@@ -41,7 +45,7 @@
 # that exceeds its timeout. It only decides when to invoke sibling scripts.
 #
 # Usage:
-#   reaper.sh [--lane fast|slow|all]   # default: all (both lanes, in order)
+#   reaper.sh [--lane budget|fast|slow|all]   # default: all
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -56,6 +60,7 @@ if [ -f "$HYGIENE_DIR/config.env" ]; then
 fi
 OVERRIDE_DIR="${DEV_HYGIENE_OVERRIDE_DIR:-}"
 FAST_STEP_TIMEOUT="${DEV_HYGIENE_FAST_STEP_TIMEOUT_SEC:-180}"
+BUDGET_STEP_TIMEOUT="${DEV_HYGIENE_BUDGET_STEP_TIMEOUT_SEC:-20}"
 SLOW_STEP_TIMEOUT="${DEV_HYGIENE_SLOW_STEP_TIMEOUT_SEC:-1800}"
 LOG_MAX_BYTES="${DEV_HYGIENE_LOG_MAX_BYTES:-5242880}"
 LOG_FILE="${DEV_HYGIENE_LOG_FILE:-}"
@@ -68,7 +73,7 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
-case "$LANE" in fast|slow|all) ;; *) echo "unknown lane: $LANE" >&2; exit 2 ;; esac
+case "$LANE" in budget|fast|slow|all) ;; *) echo "unknown lane: $LANE" >&2; exit 2 ;; esac
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 
@@ -157,19 +162,24 @@ gated() {
   fi
 }
 
+budget_lane() {
+  run_step "test workload budget (every run)" reap-browser-budget.sh "$BUDGET_STEP_TIMEOUT"
+  run_step "orphan Next budget (every run)" reap-orphan-next-budget.sh "$BUDGET_STEP_TIMEOUT"
+}
+
 fast_lane() {
   run_step "stale dev-server check (every run)" reap-stale-dev-servers.sh "$FAST_STEP_TIMEOUT"
   run_step "idle language-server check (every run)" reap-idle-lsp.sh "$FAST_STEP_TIMEOUT"
   run_step "Chrome tab memory cap (every run)" reap-chrome-tab-cap.sh "$FAST_STEP_TIMEOUT"
+  run_step "runaway Next.js check (every run)" reap-next-jobs.sh "$FAST_STEP_TIMEOUT"
   if due "$HYGIENE_DIR/.last-fast-5min" 270; then
-    run_step "runaway Next.js check (5 min)" reap-next-jobs.sh "$FAST_STEP_TIMEOUT"
-    run_step "headless Chrome orphan/resource check (5 min)" reap-runaway-chrome.sh "$FAST_STEP_TIMEOUT"
     run_step "orphaned ChatGPT helper check (5 min)" reap-orphaned-chatgpt-helpers.sh "$FAST_STEP_TIMEOUT"
     run_step "Vitest runaway-run check (5 min)" reap-runaway-vitest.sh "$FAST_STEP_TIMEOUT"
   fi
 }
 
 slow_lane() {
+  run_step "headless Chrome orphan/resource check (5 min)" reap-runaway-chrome.sh "$SLOW_STEP_TIMEOUT"
   gated .last-agent-browser 3600 "agent-browser idle-daemon check (hourly)" reap-idle-agent-browser.sh "$SLOW_STEP_TIMEOUT"
   gated .last-dev-services 3600 "local dev-service check (hourly)" reap-dev-services.sh "$SLOW_STEP_TIMEOUT"
   gated .last-storage 21600 "workspace storage cleanup (every 6h)" reap-storage.sh "$SLOW_STEP_TIMEOUT"
@@ -179,9 +189,10 @@ slow_lane() {
 }
 
 case "$LANE" in
+  budget) budget_lane ;;
   fast) fast_lane ;;
   slow) slow_lane ;;
-  all) fast_lane; slow_lane ;;
+  all) budget_lane; fast_lane; slow_lane ;;
 esac
 
 log "done ($LANE lane)"
