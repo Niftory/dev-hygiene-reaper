@@ -9,8 +9,8 @@
 # slow lane every five minutes. A timeout bounds each step.
 #
 # budget lane (launchd every 10s)
-#   * Browser test budget — every run. Caps total memory of temporary headless
-#     sessions before they fill swap.
+#   * Test workload budget — every run. Caps total resident memory of
+#     temporary headless browsers and Next dev servers before they fill swap.
 #   * Orphan Next budget — every run. Limits dev servers left by dead launchers.
 #
 # fast lane (launchd every 60s)
@@ -20,11 +20,12 @@
 #   * Idle language servers — every run. Closes idle or runaway TypeScript
 #     language servers left by agent sessions.
 #   * Chrome tab cap — every run. Holds the personal Chrome under its cap.
-#   * Runaway Next.js tree, ChatGPT helpers, Vitest — every 5 minutes.
+#   * Runaway Next.js tree — every run, so a server cannot grow unchecked for
+#     five minutes. ChatGPT helpers and Vitest — every 5 minutes.
 #
 # slow lane (launchd every 300s)
 #   * Headless Chrome — every run. Closes orphaned and runaway sessions. The
-#     quick browser budget runs separately every 10 seconds.
+#     quick test budget runs separately every 10 seconds.
 #   * agent-browser — hourly. Reclaims RAM/CPU from idle daemons via 2
 #     consecutive idle-CPU-rate sightings ~2h apart.
 #   * local dev services — hourly. Reclaims stale, idle Inngest, Hatchet, SST,
@@ -162,7 +163,7 @@ gated() {
 }
 
 budget_lane() {
-  run_step "browser test budget (every run)" reap-browser-budget.sh "$BUDGET_STEP_TIMEOUT"
+  run_step "test workload budget (every run)" reap-browser-budget.sh "$BUDGET_STEP_TIMEOUT"
   run_step "orphan Next budget (every run)" reap-orphan-next-budget.sh "$BUDGET_STEP_TIMEOUT"
 }
 
@@ -170,8 +171,8 @@ fast_lane() {
   run_step "stale dev-server check (every run)" reap-stale-dev-servers.sh "$FAST_STEP_TIMEOUT"
   run_step "idle language-server check (every run)" reap-idle-lsp.sh "$FAST_STEP_TIMEOUT"
   run_step "Chrome tab memory cap (every run)" reap-chrome-tab-cap.sh "$FAST_STEP_TIMEOUT"
+  run_step "runaway Next.js check (every run)" reap-next-jobs.sh "$FAST_STEP_TIMEOUT"
   if due "$HYGIENE_DIR/.last-fast-5min" 270; then
-    run_step "runaway Next.js check (5 min)" reap-next-jobs.sh "$FAST_STEP_TIMEOUT"
     run_step "orphaned ChatGPT helper check (5 min)" reap-orphaned-chatgpt-helpers.sh "$FAST_STEP_TIMEOUT"
     run_step "Vitest runaway-run check (5 min)" reap-runaway-vitest.sh "$FAST_STEP_TIMEOUT"
   fi

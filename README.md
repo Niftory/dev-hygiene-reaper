@@ -106,14 +106,16 @@ include:
 - `DEV_HYGIENE_STRIP_HOURS`: idle age before linked-worktree dependencies are removed.
 - `AGENT_ARTIFACT_MAX_AGE_DAYS`: age before known agent temporary directories are removed.
 - `DEV_HYGIENE_PROJECTS_ROOT`: parent directory used to verify Docker Compose projects.
-- `NEXT_REAP_TREE_MAX_MB` (default 6 GiB footprint) and `NEXT_REAP_MIN_AGE_SEC`.
+- `NEXT_REAP_TREE_MAX_MB` (default 4 GiB footprint) and `NEXT_REAP_MIN_AGE_SEC`
+  (default 2 minutes). The fast lane checks Next servers every minute.
 - `CHROME_REAP_CPU_PERCENT`, `CHROME_REAP_RAM_PERCENT`,
   `CHROME_REAP_PROFILE_RSS_MB`, and `CHROME_REAP_MIN_AGE_SEC`.
-- `CHROME_REAP_TOTAL_RSS_MB`: total temporary browser RSS limit. Defaults to
-  12 GiB, including each profile's agent-browser daemon. The oldest profiles
-  close first when the limit is exceeded. There is no session-count limit.
-  This watchdog checks every 10 seconds, so use can briefly exceed the limit
-  between checks.
+- `TEST_REAP_TOTAL_RSS_MB`: total RSS limit for temporary browser sessions and
+  Next dev servers. Defaults to 8 GiB. The largest workload closes first when
+  the limit is exceeded. There is no session-count limit. The watchdog checks
+  every 10 seconds, so use can briefly exceed the limit between checks.
+- `CHROME_REAP_TOTAL_RSS_MB`: browser-only limit for the slower Chrome cleanup.
+  The quick test budget uses this value when `TEST_REAP_TOTAL_RSS_MB` is unset.
 - `NEXT_REAP_MAX_ORPHANS`: cap on Next dev servers whose launchers have exited.
   Defaults to three. The budget lane checks this every 10 seconds.
 - `VITEST_REAP_AGE_MIN_SEC` and `VITEST_REAP_RSS_MAX_MB`.
