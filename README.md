@@ -74,6 +74,7 @@ example. Without `--lane`, `reaper.sh` runs both lanes in order.
 | slow | Workspace cache and worktree cleanup | Every 6 hours |
 | slow | Agent temporary artifact cleanup | Daily |
 | slow | Docker cleanup | Daily |
+| slow | Inactive local Sift database cleanup | Daily, when enabled |
 | slow | Node and package tooling cleanup | Weekly |
 
 ## Configure
@@ -108,6 +109,9 @@ include:
 - `AGENT_ARTIFACT_MAX_AGE_DAYS`: age before known agent temporary directories are removed.
 - `CODEX_ARCHIVED_SESSION_MAX_AGE_DAYS`: age before archived Codex sessions are
   removed. The default is 14 days. It never removes current sessions.
+- `SIFT_LOCAL_DB_REAP_DAYS`: enables cleanup of inactive local Sift Timescale
+  databases with no write for this many days. It only targets the verified
+  `~/Projects/sift` local server. It is disabled by default.
 - `AGENT_ARTIFACT_SYSTEM_TMP_ROOT`: macOS user temp root. Defaults to the path
   from `getconf DARWIN_USER_TEMP_DIR`.
 - `NEXT_REAP_TREE_MAX_MB` (default 6 GiB footprint) and `NEXT_REAP_MIN_AGE_SEC`.

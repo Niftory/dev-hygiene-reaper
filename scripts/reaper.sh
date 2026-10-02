@@ -175,6 +175,7 @@ slow_lane() {
   gated .last-storage 21600 "workspace storage cleanup (every 6h)" reap-storage.sh "$SLOW_STEP_TIMEOUT"
   gated .last-agent-artifacts 86400 "stale agent artifact cleanup (daily)" reap-agent-artifacts.sh "$SLOW_STEP_TIMEOUT"
   gated .last-docker 86400 "docker volume/image cleanup (daily)" reap-docker-volumes.sh "$SLOW_STEP_TIMEOUT"
+  gated .last-sift-local-db 86400 "inactive local Sift database cleanup (daily)" reap-sift-local-databases.sh "$SLOW_STEP_TIMEOUT"
   gated .last-node-tooling 604800 "Node and tooling cache cleanup (weekly)" reap-node-tooling.sh "$SLOW_STEP_TIMEOUT"
 }
 
