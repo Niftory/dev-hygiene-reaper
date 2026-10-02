@@ -19,7 +19,8 @@ The included reapers handle:
 - stale local Inngest, Hatchet, SST, Vite, and Turbo dev processes;
 - rebuildable workspace caches, old dependencies, and stale clean Git worktrees;
 - stale temporary directories from local coding agents;
-- old pnpm stores, package caches, and superseded Node patch versions; and
+- old pnpm stores, package caches, HyperFrames media caches, and superseded Node
+  patch versions; and
 - unused Docker state, including orphaned agent-project volumes.
 
 This project is macOS-specific. It uses `launchd`, `sysctl`, and BSD `stat`.

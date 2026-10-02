@@ -46,6 +46,7 @@ fi
 for cache in \
   "$HOME/.cache/node" \
   "$HOME/.cache/prisma" \
+  "$HOME/.cache/hyperframes" \
   "$HOME/.bun/install/cache" \
   "$HOME/Library/Caches/node-gyp" \
   "$HOME/Library/Caches/pip" \
