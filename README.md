@@ -105,6 +105,8 @@ include:
 - `DEV_HYGIENE_STRIP_HOURS`: idle age before dependencies are removed from an
   inactive project checkout. The default is 24 hours.
 - `AGENT_ARTIFACT_MAX_AGE_DAYS`: age before known agent temporary directories are removed.
+- `CODEX_ARCHIVED_SESSION_MAX_AGE_DAYS`: age before archived Codex sessions are
+  removed. The default is 14 days. It never removes current sessions.
 - `AGENT_ARTIFACT_SYSTEM_TMP_ROOT`: macOS user temp root. Defaults to the path
   from `getconf DARWIN_USER_TEMP_DIR`.
 - `NEXT_REAP_TREE_MAX_MB` (default 6 GiB footprint) and `NEXT_REAP_MIN_AGE_SEC`.

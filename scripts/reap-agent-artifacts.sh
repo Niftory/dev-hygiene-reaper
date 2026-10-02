@@ -5,12 +5,17 @@ set -uo pipefail
 TMP_ROOT="${AGENT_ARTIFACT_TMP_ROOT:-/private/tmp}"
 SYSTEM_TMP_ROOT="${AGENT_ARTIFACT_SYSTEM_TMP_ROOT:-$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null || true)}"
 MAX_AGE_DAYS="${AGENT_ARTIFACT_MAX_AGE_DAYS:-1}"
+CODEX_ARCHIVED_SESSIONS_ROOT="${CODEX_ARCHIVED_SESSIONS_ROOT:-$HOME/.codex/archived_sessions}"
+CODEX_ARCHIVED_SESSION_MAX_AGE_DAYS="${CODEX_ARCHIVED_SESSION_MAX_AGE_DAYS:-14}"
 STATE_DIR="${DEV_HYGIENE_STATE_DIR:-$HOME/.dev-hygiene}"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 
 case "$MAX_AGE_DAYS" in
   ''|*[!0-9]*|0) log "AGENT_ARTIFACT_MAX_AGE_DAYS must be a positive integer — skip"; exit 0 ;;
+esac
+case "$CODEX_ARCHIVED_SESSION_MAX_AGE_DAYS" in
+  ''|*[!0-9]*|0) log "CODEX_ARCHIVED_SESSION_MAX_AGE_DAYS must be a positive integer — skip"; exit 0 ;;
 esac
 [ -d "$TMP_ROOT" ] || { log "temporary root is missing — skip: $TMP_ROOT"; exit 0; }
 
@@ -128,5 +133,14 @@ for cache_root in "$HOME/.codex/.tmp" "$HOME/.agent-browser/tmp"; do
   [ -d "$cache_root" ] || continue
   find "$cache_root" -mindepth 1 -mtime +6 -depth -delete 2>/dev/null || true
 done
+
+if [ -d "$CODEX_ARCHIVED_SESSIONS_ROOT" ]; then
+  archived_count="$(find "$CODEX_ARCHIVED_SESSIONS_ROOT" -mindepth 1 -maxdepth 1 \
+    -mtime "+$((CODEX_ARCHIVED_SESSION_MAX_AGE_DAYS - 1))" -print 2>/dev/null | wc -l | tr -d '[:space:]')"
+  log "remove $archived_count archived Codex sessions older than $CODEX_ARCHIVED_SESSION_MAX_AGE_DAYS day(s)"
+  find "$CODEX_ARCHIVED_SESSIONS_ROOT" -mindepth 1 -maxdepth 1 \
+    -mtime "+$((CODEX_ARCHIVED_SESSION_MAX_AGE_DAYS - 1))" -depth -delete 2>/dev/null || \
+    log "could not fully clean archived Codex sessions"
+fi
 
 log "done: removed $removed agent artifacts and $system_removed system temp entries, active kept $kept"
