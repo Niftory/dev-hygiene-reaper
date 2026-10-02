@@ -48,7 +48,7 @@ has_live_web_dev_server() {
     case "$command" in
       *"$root"*)
         case "$command" in
-          *'/.next/'*|*'/node_modules/next/'*|*'/node_modules/.bin/next'*|*' next dev'*|\
+          *'/.next/'*|*'/node_modules/next/'*|*'/node_modules/.bin/next'*|*' next '*|\
           *'/node_modules/vite/'*|*'/node_modules/.bin/vite'*|*' vite dev'*) return 0 ;;
         esac
         ;;
