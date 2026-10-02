@@ -1,26 +1,22 @@
 #!/usr/bin/env bash
 # Reclaim rebuildable caches, old dependencies, and stale clean worktrees.
-# Set DEV_HYGIENE_REPOS to a space-separated list of primary Git checkouts.
+# Scans Git checkouts under DEV_HYGIENE_PROJECTS_ROOT and optional extra repos.
 set -uo pipefail
 
 REPOS="${DEV_HYGIENE_REPOS:-}"
+PROJECTS_ROOT="${DEV_HYGIENE_PROJECTS_ROOT:-$HOME/Projects}"
 STALE_DAYS="${DEV_HYGIENE_STALE_DAYS:-3}"
-STRIP_HOURS="${DEV_HYGIENE_STRIP_HOURS:-48}"
+STRIP_HOURS="${DEV_HYGIENE_STRIP_HOURS:-24}"
+EMPTY_TRASH="${DEV_HYGIENE_EMPTY_TRASH:-0}"
 STATE_DIR="${DEV_HYGIENE_STATE_DIR:-$HOME/.dev-hygiene}"
 LOCK_DIR="$STATE_DIR/reap-storage.lock"
 NOW="$(date +%s)"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
-human() { du -sh "$1" 2>/dev/null | awk '{print $1}'; }
 
 case "$STALE_DAYS:$STRIP_HOURS" in
   *[!0-9:]*) log "storage age settings must be non-negative integers — skip"; exit 0 ;;
 esac
-
-if [ -z "$REPOS" ]; then
-  log "DEV_HYGIENE_REPOS is not set — skip workspace storage cleanup"
-  exit 0
-fi
 
 mkdir -p "$STATE_DIR"
 if [ -d "$LOCK_DIR" ]; then
@@ -46,63 +42,157 @@ is_active() {
   return 1
 }
 
+has_live_web_dev_server() {
+  local root="$1" command
+  while IFS= read -r command; do
+    case "$command" in
+      *"$root"*)
+        case "$command" in
+          *'/.next/'*|*'/node_modules/next/'*|*'/node_modules/.bin/next'*|*' next '*|\
+          *'/node_modules/vite/'*|*'/node_modules/.bin/vite'*|*' vite dev'*) return 0 ;;
+        esac
+        ;;
+    esac
+  done <<< "$process_snapshot"
+  return 1
+}
+
+clean_next_caches() {
+  local root="$1" path
+  if has_live_web_dev_server "$root"; then
+    log "live web dev server — keep .next: $root"
+    return
+  fi
+
+  while IFS= read -r -d '' path; do
+    log "remove inactive Next output: $path"
+    rm -rf "$path"
+  done < <(find "$root" -name .git -prune -o -name node_modules -prune -o \
+    -name .next -type d -print0 2>/dev/null)
+}
+
 clean_caches() {
   local root="$1" path
-  while IFS= read -r path; do
+  while IFS= read -r -d '' path; do
     [ -n "$path" ] || continue
-    log "remove cache $(human "$path"): $path"
+    log "remove generated data: $path"
     rm -rf "$path"
-  done < <(find "$root" -name node_modules -prune -o \
+  done < <(find "$root" -name .git -prune -o -name node_modules -prune -o \
     \( -name .next -o -name .turbo -o -name .vite -o -name .vite-temp \
-       -o -name dist -o -name coverage \) -type d -print 2>/dev/null)
+       -o -name .vercel -o -name .parcel-cache -o -name .cache \
+       -o -name .output -o -name dist -o -name out \
+       -o -name coverage -o -name .nyc_output -o -name playwright-report \
+       -o -name storybook-static -o -name target -o -name .pytest_cache \
+       -o -name .mypy_cache -o -name .ruff_cache \) -type d -print0 2>/dev/null)
 
   for path in "$root/.sst/dist" "$root/.sst/artifacts"; do
     [ -d "$path" ] || continue
-    log "remove cache $(human "$path"): $path"
+    log "remove generated data: $path"
     rm -rf "$path"
   done
+}
+
+clean_dependencies() {
+  local root="$1" mtime age path
+
+  mtime="$(stat -f %m "$root" 2>/dev/null || echo "$NOW")"
+  age=$((NOW - mtime))
+  [ "$age" -ge $((STRIP_HOURS * 3600)) ] || return
+
+  while IFS= read -r -d '' path; do
+    log "remove stale dependencies: $path"
+    rm -rf "$path"
+  done < <(find "$root" -name .git -prune -o -name node_modules -type d -print0 -prune 2>/dev/null)
 }
 
 clean_worktree() {
   local main="$1" worktree="$2" modified mtime age
   if is_active "$worktree"; then
-    log "active — keep: $worktree"
+    log "active — keep dependencies: $worktree"
+    clean_next_caches "$worktree"
     return
   fi
 
-  clean_caches "$worktree"
   mtime="$(stat -f %m "$worktree" 2>/dev/null || echo "$NOW")"
   age=$((NOW - mtime))
-  if [ -d "$worktree/node_modules" ] && [ "$age" -ge $((STRIP_HOURS * 3600)) ]; then
-    log "remove dependencies $(human "$worktree/node_modules"): $worktree/node_modules"
-    rm -rf "$worktree/node_modules"
-  fi
+  clean_caches "$worktree"
+  clean_dependencies "$worktree"
 
-  modified="$(git -C "$worktree" status --porcelain 2>/dev/null | head -1)"
-  if [ -z "$modified" ] && [ "$age" -ge $((STALE_DAYS * 86400)) ]; then
-    log "remove stale clean worktree: $worktree"
-    git -C "$main" worktree remove --force "$worktree" || log "could not remove: $worktree"
+  if [ "$age" -ge $((STALE_DAYS * 86400)) ]; then
+    modified="$(git -C "$worktree" status --porcelain 2>/dev/null | head -1)"
+    if [ -z "$modified" ]; then
+      log "remove stale clean worktree: $worktree"
+      git -C "$main" worktree remove --force "$worktree" || log "could not remove: $worktree"
+    fi
   fi
 }
 
-for repo in $REPOS; do
-  [ -d "$repo" ] || { log "missing repo: $repo"; continue; }
-  git -C "$repo" rev-parse --git-dir >/dev/null 2>&1 || { log "not a Git repo: $repo"; continue; }
-  main="$(git -C "$repo" worktree list --porcelain | awk '/^worktree / { print $2; exit }')"
+REPO_LIST="$STATE_DIR/storage-repos.$$"
+SEEN_LIST="$STATE_DIR/storage-seen.$$"
+: > "$REPO_LIST"
+: > "$SEEN_LIST"
+trap 'rm -f "$REPO_LIST" "$SEEN_LIST"; rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
+
+add_repo() {
+  local repo="$1" common
+  [ -d "$repo" ] || return
+  git -C "$repo" rev-parse --git-dir >/dev/null 2>&1 || return
+  common="$(git -C "$repo" rev-parse --git-common-dir 2>/dev/null)"
+  case "$common" in
+    /*) ;;
+    *) common="$repo/$common" ;;
+  esac
+  common="$(cd "$common" 2>/dev/null && pwd -P)" || return
+  grep -Fqx "$common" "$SEEN_LIST" && return
+  echo "$common" >> "$SEEN_LIST"
+  echo "$repo" >> "$REPO_LIST"
+}
+
+for repo in $REPOS; do add_repo "$repo"; done
+if [ -d "$PROJECTS_ROOT" ]; then
+  while IFS= read -r -d '' repo; do add_repo "$repo"; done \
+    < <(find "$PROJECTS_ROOT" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
+fi
+
+if [ ! -s "$REPO_LIST" ]; then
+  log "no Git repositories found under configured paths — skip workspace cleanup"
+fi
+
+while IFS= read -r repo; do
+  [ -n "$repo" ] || continue
+  main="$(git -C "$repo" worktree list --porcelain | sed -n 's/^worktree //p' | head -1)"
   [ -n "$main" ] || continue
 
   if is_active "$main"; then
-    log "active — keep caches: $main"
+    log "active — keep dependencies: $main"
+    clean_next_caches "$main"
   else
     clean_caches "$main"
+    clean_dependencies "$main"
   fi
 
   while IFS= read -r worktree; do
     [ -d "$worktree" ] || continue
     [ "$worktree" = "$main" ] && continue
     clean_worktree "$main" "$worktree"
-  done < <(git -C "$main" worktree list --porcelain | awk '/^worktree / { print $2 }')
+  done < <(git -C "$main" worktree list --porcelain | sed -n 's/^worktree //p')
   git -C "$main" worktree prune
-done
+done < "$REPO_LIST"
+
+if [ "$EMPTY_TRASH" = 1 ]; then
+  if command -v osascript >/dev/null 2>&1; then
+    trash_items="$(osascript -e 'tell application "Finder" to count items in trash' 2>/dev/null || true)"
+    case "$trash_items" in
+      ''|*[!0-9]*) log "could not check Finder Trash; keep it" ;;
+      0) log "Finder Trash is already empty" ;;
+      *)
+        log "empty Finder Trash ($trash_items items)"
+        osascript -e 'tell application "Finder" to empty trash' || log "could not empty Finder Trash"
+        ;;
+    esac
+  else
+    log "osascript unavailable — keep Finder Trash"
+  fi
+fi
 
 log "done"

@@ -19,7 +19,8 @@ The included reapers handle:
 - stale local Inngest, Hatchet, SST, Vite, and Turbo dev processes;
 - rebuildable workspace caches, old dependencies, and stale clean Git worktrees;
 - stale temporary directories from local coding agents;
-- old pnpm stores, package caches, and superseded Node patch versions; and
+- pnpm stores, package caches, HyperFrames media caches, and superseded Node
+  patch versions; and
 - unused Docker state, including orphaned agent-project volumes.
 
 This project is macOS-specific. It uses `launchd`, `sysctl`, and BSD `stat`.
@@ -30,9 +31,10 @@ Read each script before you use it. The scripts can terminate processes and
 delete rebuildable data.
 
 1. Clone this repository.
-2. Put machine settings in `~/.dev-hygiene/config.env`. At least set
-   `DEV_HYGIENE_REPOS` to a space-separated list of the primary Git checkouts
-   that it may clean.
+2. Put machine settings in `~/.dev-hygiene/config.env`. Storage cleanup scans
+   Git checkouts under `~/Projects` by default. Set `DEV_HYGIENE_PROJECTS_ROOT`
+   to change that root. You can also list extra primary checkouts in
+   `DEV_HYGIENE_REPOS`.
 3. Install both lanes:
 
    ```bash
@@ -72,6 +74,7 @@ example. Without `--lane`, `reaper.sh` runs both lanes in order.
 | slow | Workspace cache and worktree cleanup | Every 6 hours |
 | slow | Agent temporary artifact cleanup | Daily |
 | slow | Docker cleanup | Daily |
+| slow | Inactive local Sift database cleanup | Daily, when enabled |
 | slow | Node and package tooling cleanup | Weekly |
 
 ## Configure
@@ -96,10 +99,21 @@ include:
 - `CHROME_TAB_CAP_MB`: the personal Chrome memory cap. Defaults to 24 GiB.
 - `DEV_HYGIENE_FAST_STEP_TIMEOUT_SEC` and `DEV_HYGIENE_SLOW_STEP_TIMEOUT_SEC`.
 - `DEV_HYGIENE_REPOS`: space-separated primary Git checkout paths.
+- `DEV_HYGIENE_PROJECTS_ROOT`: root to scan for Git checkouts. Defaults to
+  `~/Projects`. Docker cleanup also uses it to verify Compose projects.
+- `DEV_HYGIENE_EMPTY_TRASH`: set to `1` to empty Finder Trash during storage
+  cleanup. The default is `0`.
 - `DEV_HYGIENE_STALE_DAYS`: age before a clean linked worktree is removed.
-- `DEV_HYGIENE_STRIP_HOURS`: idle age before linked-worktree dependencies are removed.
+- `DEV_HYGIENE_STRIP_HOURS`: idle age before dependencies are removed from an
+  inactive project checkout. The default is 24 hours.
 - `AGENT_ARTIFACT_MAX_AGE_DAYS`: age before known agent temporary directories are removed.
-- `DEV_HYGIENE_PROJECTS_ROOT`: parent directory used to verify Docker Compose projects.
+- `CODEX_ARCHIVED_SESSION_MAX_AGE_DAYS`: age before archived Codex sessions are
+  removed. The default is 14 days. It never removes current sessions.
+- `SIFT_LOCAL_DB_REAP_DAYS`: enables cleanup of inactive local Sift Timescale
+  databases with no write for this many days. It only targets the verified
+  `~/Projects/sift` local server. It is disabled by default.
+- `AGENT_ARTIFACT_SYSTEM_TMP_ROOT`: macOS user temp root. Defaults to the path
+  from `getconf DARWIN_USER_TEMP_DIR`.
 - `NEXT_REAP_TREE_MAX_MB` (default 6 GiB footprint) and `NEXT_REAP_MIN_AGE_SEC`.
 - `CHROME_REAP_CPU_PERCENT`, `CHROME_REAP_RAM_PERCENT`,
   `CHROME_REAP_PROFILE_RSS_MB`, and `CHROME_REAP_MIN_AGE_SEC`.
@@ -109,13 +123,24 @@ include:
 - `DEV_SERVICE_REAP_AGE_MIN_SEC`, `DEV_SERVICE_REAP_IDLE_CPU_SEC`, and
   `DEV_SERVICE_REAP_IDLE_RUNS`.
 
-Storage cleanup skips paths that appear in a live process command. It removes
-only clean stale worktrees. Git branches remain. It does not remove dependencies
-from the primary checkout.
+Storage cleanup skips dependencies in paths that appear in a live process
+command. It removes only clean stale worktrees. Git branches remain. For an
+active checkout, it can still remove `.next` output when no local Next or Vite
+process uses that checkout. It removes dependencies from
+any inactive project checkout after the configured idle age, including nested
+dependency folders in a primary checkout. It does not cross into nested Git
+repositories. A package install restores the dependencies when you need that
+checkout.
+It discovers linked worktrees for each Git repository under the configured
+projects root. It removes common build outputs without running `du` on each
+folder. Finder Trash cleanup stays off unless `DEV_HYGIENE_EMPTY_TRASH=1`.
 
-Agent cleanup matches a narrow list of temporary directory prefixes. It skips
-paths that appear in a live process command. It does not touch Codex or Claude
-task history, personal files, or browser profiles.
+Agent cleanup matches known agent prefixes in `/private/tmp`. In the macOS user
+temp folder, it removes old top-level entries only when no process has an open
+file there or refers to the path in its command. It preserves empty folders and
+Apple service folders. It also keeps any temp folder with a recently changed
+file inside it. It does not touch Codex or Claude task history, personal files,
+or persistent browser profiles.
 
 The idle agent-browser check matches the daemon executable basename. It does
 not mistake a worktree under `.claude/` for the Claude application.

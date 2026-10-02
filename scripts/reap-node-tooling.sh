@@ -3,7 +3,6 @@
 set -uo pipefail
 
 NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
-PNPM_STORE_ROOT="${PNPM_STORE_ROOT:-$HOME/Library/pnpm/store}"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 human() { du -sh "$1" 2>/dev/null | awk '{print $1}'; }
@@ -24,15 +23,6 @@ newest_node_bin="$(
 [ -n "$newest_node_bin" ] && PATH="$newest_node_bin:$PATH"
 
 current_store="$(pnpm store path 2>/dev/null || true)"
-if [ -n "$current_store" ] && [ -d "$PNPM_STORE_ROOT" ]; then
-  for store in "$PNPM_STORE_ROOT"/v*; do
-    [ -d "$store" ] || continue
-    [ "$store" = "$current_store" ] && continue
-    log "remove legacy pnpm store $(human "$store"): $store"
-    find "$store" -depth -delete 2>/dev/null || log "could not remove: $store"
-  done
-fi
-
 if command -v pnpm >/dev/null 2>&1; then
   log "prune current pnpm store: ${current_store:-unknown}"
   pnpm store prune 2>&1 | sed 's/^/  /'
@@ -46,6 +36,7 @@ fi
 for cache in \
   "$HOME/.cache/node" \
   "$HOME/.cache/prisma" \
+  "$HOME/.cache/hyperframes" \
   "$HOME/.bun/install/cache" \
   "$HOME/Library/Caches/node-gyp" \
   "$HOME/Library/Caches/pip" \
