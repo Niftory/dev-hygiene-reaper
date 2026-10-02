@@ -102,7 +102,7 @@ clean_dependencies() {
   while IFS= read -r -d '' path; do
     log "remove stale dependencies: $path"
     rm -rf "$path"
-  done < <(find "$root" -name .git -prune -o -name node_modules -type d -print0 2>/dev/null)
+  done < <(find "$root" -name .git -prune -o -name node_modules -type d -print0 -prune 2>/dev/null)
 }
 
 clean_worktree() {
