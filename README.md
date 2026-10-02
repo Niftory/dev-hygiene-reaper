@@ -118,8 +118,10 @@ include:
 - `DEV_SERVICE_REAP_AGE_MIN_SEC`, `DEV_SERVICE_REAP_IDLE_CPU_SEC`, and
   `DEV_SERVICE_REAP_IDLE_RUNS`.
 
-Storage cleanup skips paths that appear in a live process command. It removes
-only clean stale worktrees. Git branches remain. It removes dependencies from
+Storage cleanup skips dependencies in paths that appear in a live process
+command. It removes only clean stale worktrees. Git branches remain. For an
+active checkout, it can still remove `.next` output when no local Next or Vite
+process uses that checkout. It removes dependencies from
 any inactive project checkout after the configured idle age, including nested
 dependency folders in a primary checkout. It does not cross into nested Git
 repositories. A package install restores the dependencies when you need that

@@ -42,6 +42,35 @@ is_active() {
   return 1
 }
 
+has_live_web_dev_server() {
+  local root="$1" command
+  while IFS= read -r command; do
+    case "$command" in
+      *"$root"*)
+        case "$command" in
+          *'/.next/'*|*'/node_modules/next/'*|*'/node_modules/.bin/next'*|*' next dev'*|\
+          *'/node_modules/vite/'*|*'/node_modules/.bin/vite'*|*' vite dev'*) return 0 ;;
+        esac
+        ;;
+    esac
+  done <<< "$process_snapshot"
+  return 1
+}
+
+clean_next_caches() {
+  local root="$1" path
+  if has_live_web_dev_server "$root"; then
+    log "live web dev server — keep .next: $root"
+    return
+  fi
+
+  while IFS= read -r -d '' path; do
+    log "remove inactive Next output: $path"
+    rm -rf "$path"
+  done < <(find "$root" -name .git -prune -o -name node_modules -prune -o \
+    -name .next -type d -print0 2>/dev/null)
+}
+
 clean_caches() {
   local root="$1" path
   while IFS= read -r -d '' path; do
@@ -79,7 +108,8 @@ clean_dependencies() {
 clean_worktree() {
   local main="$1" worktree="$2" modified mtime age
   if is_active "$worktree"; then
-    log "active — keep: $worktree"
+    log "active — keep dependencies: $worktree"
+    clean_next_caches "$worktree"
     return
   fi
 
@@ -134,7 +164,8 @@ while IFS= read -r repo; do
   [ -n "$main" ] || continue
 
   if is_active "$main"; then
-    log "active — keep caches: $main"
+    log "active — keep dependencies: $main"
+    clean_next_caches "$main"
   else
     clean_caches "$main"
     clean_dependencies "$main"
