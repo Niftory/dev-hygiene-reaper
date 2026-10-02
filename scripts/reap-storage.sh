@@ -6,7 +6,7 @@ set -uo pipefail
 REPOS="${DEV_HYGIENE_REPOS:-}"
 PROJECTS_ROOT="${DEV_HYGIENE_PROJECTS_ROOT:-$HOME/Projects}"
 STALE_DAYS="${DEV_HYGIENE_STALE_DAYS:-3}"
-STRIP_HOURS="${DEV_HYGIENE_STRIP_HOURS:-48}"
+STRIP_HOURS="${DEV_HYGIENE_STRIP_HOURS:-24}"
 EMPTY_TRASH="${DEV_HYGIENE_EMPTY_TRASH:-0}"
 STATE_DIR="${DEV_HYGIENE_STATE_DIR:-$HOME/.dev-hygiene}"
 LOCK_DIR="$STATE_DIR/reap-storage.lock"
@@ -63,6 +63,18 @@ clean_caches() {
   done
 }
 
+clean_dependencies() {
+  local root="$1" mtime age
+  [ -d "$root/node_modules" ] || return
+
+  mtime="$(stat -f %m "$root" 2>/dev/null || echo "$NOW")"
+  age=$((NOW - mtime))
+  if [ "$age" -ge $((STRIP_HOURS * 3600)) ]; then
+    log "remove stale dependencies: $root/node_modules"
+    rm -rf "$root/node_modules"
+  fi
+}
+
 clean_worktree() {
   local main="$1" worktree="$2" modified mtime age
   if is_active "$worktree"; then
@@ -73,10 +85,7 @@ clean_worktree() {
   mtime="$(stat -f %m "$worktree" 2>/dev/null || echo "$NOW")"
   age=$((NOW - mtime))
   clean_caches "$worktree"
-  if [ -d "$worktree/node_modules" ] && [ "$age" -ge $((STRIP_HOURS * 3600)) ]; then
-    log "remove stale dependencies: $worktree/node_modules"
-    rm -rf "$worktree/node_modules"
-  fi
+  clean_dependencies "$worktree"
 
   if [ "$age" -ge $((STALE_DAYS * 86400)) ]; then
     modified="$(git -C "$worktree" status --porcelain 2>/dev/null | head -1)"
@@ -127,6 +136,7 @@ while IFS= read -r repo; do
     log "active — keep caches: $main"
   else
     clean_caches "$main"
+    clean_dependencies "$main"
   fi
 
   while IFS= read -r worktree; do

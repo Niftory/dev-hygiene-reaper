@@ -102,7 +102,8 @@ include:
 - `DEV_HYGIENE_EMPTY_TRASH`: set to `1` to empty Finder Trash during storage
   cleanup. The default is `0`.
 - `DEV_HYGIENE_STALE_DAYS`: age before a clean linked worktree is removed.
-- `DEV_HYGIENE_STRIP_HOURS`: idle age before linked-worktree dependencies are removed.
+- `DEV_HYGIENE_STRIP_HOURS`: idle age before dependencies are removed from an
+  inactive project checkout. The default is 24 hours.
 - `AGENT_ARTIFACT_MAX_AGE_DAYS`: age before known agent temporary directories are removed.
 - `AGENT_ARTIFACT_SYSTEM_TMP_ROOT`: macOS user temp root. Defaults to the path
   from `getconf DARWIN_USER_TEMP_DIR`.
@@ -116,8 +117,9 @@ include:
   `DEV_SERVICE_REAP_IDLE_RUNS`.
 
 Storage cleanup skips paths that appear in a live process command. It removes
-only clean stale worktrees. Git branches remain. It does not remove dependencies
-from the primary checkout.
+only clean stale worktrees. Git branches remain. It removes dependencies from
+any inactive project checkout after the configured idle age, including a
+primary checkout. A package install restores them when you need that checkout.
 It discovers linked worktrees for each Git repository under the configured
 projects root. It removes common build outputs without running `du` on each
 folder. Finder Trash cleanup stays off unless `DEV_HYGIENE_EMPTY_TRASH=1`.
