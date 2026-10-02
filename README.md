@@ -118,8 +118,10 @@ include:
 
 Storage cleanup skips paths that appear in a live process command. It removes
 only clean stale worktrees. Git branches remain. It removes dependencies from
-any inactive project checkout after the configured idle age, including a
-primary checkout. A package install restores them when you need that checkout.
+any inactive project checkout after the configured idle age, including nested
+dependency folders in a primary checkout. It does not cross into nested Git
+repositories. A package install restores the dependencies when you need that
+checkout.
 It discovers linked worktrees for each Git repository under the configured
 projects root. It removes common build outputs without running `du` on each
 folder. Finder Trash cleanup stays off unless `DEV_HYGIENE_EMPTY_TRASH=1`.

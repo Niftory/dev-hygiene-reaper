@@ -64,15 +64,16 @@ clean_caches() {
 }
 
 clean_dependencies() {
-  local root="$1" mtime age
-  [ -d "$root/node_modules" ] || return
+  local root="$1" mtime age path
 
   mtime="$(stat -f %m "$root" 2>/dev/null || echo "$NOW")"
   age=$((NOW - mtime))
-  if [ "$age" -ge $((STRIP_HOURS * 3600)) ]; then
-    log "remove stale dependencies: $root/node_modules"
-    rm -rf "$root/node_modules"
-  fi
+  [ "$age" -ge $((STRIP_HOURS * 3600)) ] || return
+
+  while IFS= read -r -d '' path; do
+    log "remove stale dependencies: $path"
+    rm -rf "$path"
+  done < <(find "$root" -name .git -prune -o -name node_modules -type d -print0 2>/dev/null)
 }
 
 clean_worktree() {
